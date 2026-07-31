@@ -22,7 +22,7 @@ from .detect.regexes import RegexDetector
 from .detect.rules import RulesDetector
 from .proxy import redact_request, restore_all, restore_response, session_key
 from .sse import SSERewriter
-from .stats import EventLog, RequestEvent
+from .stats import RequestEvent, RequestLog, read_lines, summary
 from .vault import Vault
 
 # Headers that must not be forwarded - they describe a single connection.
@@ -36,9 +36,8 @@ class ProxyState:
     def __init__(self, config: Config) -> None:
         self.config = config
         self.vault = Vault()
-        self.log = EventLog(config.db_path)
+        self.log = RequestLog(config.requests_path)
         self.started_at = time.time()
-        self.subscribers: set[asyncio.Queue] = set()
         self.request_count = 0
 
         rules = RulesDetector(config.rules_path)
@@ -55,17 +54,8 @@ class ProxyState:
         )
         self.client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=None, write=60.0))
 
-    def publish(self, event: RequestEvent) -> None:
-        payload = event.as_dict()
-        for queue in list(self.subscribers):
-            try:
-                queue.put_nowait(payload)
-            except asyncio.QueueFull:
-                pass
-
     def record(self, event: RequestEvent) -> None:
         self.log.record(event)
-        self.publish(event)
 
 
 class _NullDetector:
@@ -86,7 +76,6 @@ def create_app(config: Config) -> Starlette:
             asyncio.get_running_loop().run_in_executor(None, state.gliner.load)
         yield
         await state.client.aclose()
-        state.log.close()
 
     app = Starlette(routes=_routes(state), lifespan=lifespan)
     app.state.proxy = state
@@ -105,7 +94,6 @@ def _routes(state: ProxyState) -> list[Route]:
         Route("/_admin/status", _admin_status(state), methods=["GET"]),
         Route("/_admin/stats", _admin_stats(state), methods=["GET"]),
         Route("/_admin/last", _admin_last(state), methods=["GET"]),
-        Route("/_admin/watch", _admin_watch(state), methods=["GET"]),
         Route("/_admin/vault", _admin_vault(state), methods=["GET"]),
         Route("/_admin/vault/clear", _admin_vault_clear(state), methods=["POST"]),
         Route("/_admin/rules/reload", _admin_rules_reload(state), methods=["POST"]),
@@ -163,7 +151,6 @@ async def _handle_messages(state: ProxyState, request: Request) -> Response:
     event.detect_ms = (time.perf_counter() - detect_started) * 1000
     event.kinds = dict(kinds)
     event.layers = dict(layers)
-    event.pairs = _pairs(state, kinds, layers)
     event.masked = masked
     event.keys = keys
     payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
@@ -301,17 +288,6 @@ async def _proxy_raw(state: ProxyState, request: Request, upstream_base: str, ra
     )
 
 
-def _pairs(state: ProxyState, kinds, layers) -> dict[tuple[str, str], int]:
-    """Approximation: with a single layer the attribution is exact, with several the
-    kinds are attributed to the dominant layer."""
-    if not kinds:
-        return {}
-    if len(layers) == 1:
-        layer = next(iter(layers))
-        return {(kind, layer): count for kind, count in kinds.items()}
-    dominant = max(layers.items(), key=lambda item: item[1])[0] if layers else "unknown"
-    return {(kind, dominant): count for kind, count in kinds.items()}
-
 
 # --- admin endpoints ----------------------------------------------------------
 
@@ -323,7 +299,7 @@ def _admin_health(state: ProxyState):
 
 def _admin_status(state: ProxyState):
     async def handler(request: Request) -> Response:
-        summary = state.log.summary(since=time.time() - 3600)
+        recent = summary(read_lines(state.config.requests_path, since=time.time() - 3600))
         return JSONResponse({
             "version": __version__,
             "uptime_s": round(time.time() - state.started_at, 1),
@@ -336,7 +312,7 @@ def _admin_status(state: ProxyState):
             "rules_count": state.rules.count,
             "rules_error": state.rules.error,
             "vault": state.vault.stats(),
-            "sessions_last_hour": summary["sessions"],
+            "sessions_last_hour": recent["sessions"],
             "providers": {name: p.upstream for name, p in state.config.providers.items()},
         })
     return handler
@@ -345,35 +321,16 @@ def _admin_status(state: ProxyState):
 def _admin_stats(state: ProxyState):
     async def handler(request: Request) -> Response:
         since = request.query_params.get("since")
-        return JSONResponse(state.log.summary(float(since) if since else None))
+        entries = read_lines(state.config.requests_path, since=float(since) if since else None)
+        return JSONResponse(summary(entries))
     return handler
 
 
 def _admin_last(state: ProxyState):
     async def handler(request: Request) -> Response:
         limit = int(request.query_params.get("n", 5))
-        return JSONResponse({"requests": state.log.recent(limit)})
-    return handler
-
-
-def _admin_watch(state: ProxyState):
-    async def handler(request: Request) -> Response:
-        queue: asyncio.Queue = asyncio.Queue(maxsize=100)
-        state.subscribers.add(queue)
-
-        async def stream():
-            try:
-                while True:
-                    try:
-                        event = await asyncio.wait_for(queue.get(), timeout=15)
-                    except asyncio.TimeoutError:
-                        yield b": keepalive\n\n"
-                        continue
-                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode("utf-8")
-            finally:
-                state.subscribers.discard(queue)
-
-        return StreamingResponse(stream(), media_type="text/event-stream")
+        entries = read_lines(state.config.requests_path, limit=limit)
+        return JSONResponse({"requests": list(reversed(entries))})
     return handler
 
 

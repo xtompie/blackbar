@@ -16,6 +16,7 @@ from starlette.routing import Route
 
 from blackbar.config import Config, Provider
 from blackbar.server import create_app
+from blackbar.stats import read_lines
 
 SEEN: dict = {}
 
@@ -143,14 +144,20 @@ async def test_other_paths_pass_through(proxy):
     assert response.json()["path"] == "/v1/models"
 
 
-async def test_event_reaches_the_log(proxy):
+async def test_request_lands_in_the_log_file(proxy):
+    """One line per request, readable with tail - and carrying no values."""
     await _call(proxy, "/anthropic/v1/messages", json={
         "model": "claude-opus-5",
         "messages": [{"role": "user", "content": "write to jan@example.com"}],
     })
-    latest = proxy.state.proxy.log.recent(1)[0]
+    path = proxy.state.proxy.config.requests_path
+    raw = path.read_text(encoding="utf-8").strip()
+    assert "jan@example.com" not in raw
+
+    latest = read_lines(path, limit=1)[0]
     assert latest["masked"] == 1
     assert latest["restored"] == 1
     assert latest["orphans"] == 0
     assert latest["cache_read"] == 500
     assert latest["kinds"] == {"email": 1}
+    assert latest["keys"][0][0] == "email"

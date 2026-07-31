@@ -86,8 +86,9 @@ class Config:
         return state_dir() / "daemon.log"
 
     @property
-    def db_path(self) -> Path:
-        return state_dir() / "events.db"
+    def requests_path(self) -> Path:
+        """One line per request; `tail -f` on it works without blackbar."""
+        return state_dir() / "requests.log"
 
     @property
     def install_report_path(self) -> Path:

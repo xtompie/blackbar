@@ -11,7 +11,10 @@ from pathlib import Path
 
 import typer
 
-from . import __version__, attach as attach_mod, config as config_mod, daemon, launcher, service
+from . import (
+    __version__, attach as attach_mod, config as config_mod, daemon, launcher, service,
+    stats as stats_mod,
+)
 
 app = typer.Typer(
     add_completion=False,
@@ -173,36 +176,54 @@ def mode() -> None:
 def watch(
     reveal: bool = typer.Option(False, "--reveal", help="⚠ also print the replaced values"),
 ) -> None:
-    """Live view of the traffic, one line per request."""
-    import httpx
+    """Follow the request log, one line per request.
 
+    This is `tail -f` on ~/.local/state/blackbar/requests.log with the fields laid out
+    for reading. The plain file works with tail, grep and anything else on its own.
+    """
     config = _config()
-    _require_daemon(config)
+    path = config.requests_path
     if reveal:
         print(f"{YELLOW}⚠ --reveal prints real data to the screen.{OFF}")
-    print(f"{DIM}watching {config.base_url} - Ctrl+C to stop{OFF}")
+    print(f"{DIM}following {path} - Ctrl+C to stop{OFF}")
+
     values: dict[str, str] = {}
     try:
-        with httpx.stream("GET", f"{config.base_url}/_admin/watch", timeout=None) as response:
-            for line in response.iter_lines():
-                if not line.startswith("data:"):
+        handle = path.open("r", encoding="utf-8", errors="replace") if path.exists() else None
+        if handle:
+            handle.seek(0, 2)
+        while True:
+            if handle is None:
+                if not path.exists():
+                    time.sleep(0.5)
                     continue
-                event = json.loads(line[5:].strip())
-                # flush: watch is meant to be piped into grep/tee as well
-                print(_format_event(event), flush=True)
-                if reveal and event.get("keys"):
-                    _print_values(config, event["keys"], values)
+                handle = path.open("r", encoding="utf-8", errors="replace")
+            line = handle.readline()
+            if not line:
+                time.sleep(0.2)
+                continue
+            entry = stats_mod.parse_line(line)
+            if not entry:
+                continue
+            # flush: watch is meant to be piped into grep/tee as well
+            print(_format_event(entry), flush=True)
+            if reveal and entry["keys"]:
+                _print_values(config, entry["keys"], values)
     except KeyboardInterrupt:
         pass
-    except Exception as exc:
-        _die(str(exc))
 
 
 def _print_values(config, keys: list, cache: dict[str, str]) -> None:
-    """Resolves vault keys from the event into the values they replaced."""
+    """Resolves vault keys from a log line into the values they replaced.
+
+    The file never holds a value; only the running daemon can answer this.
+    """
     import httpx
 
     if any(key not in cache for _, key in keys):
+        if not daemon.is_running(config):
+            print(f"    {DIM}(daemon not running - values unavailable){OFF}", flush=True)
+            return
         response = httpx.get(f"{config.base_url}/_admin/vault", params={"reveal": "1"}, timeout=10)
         cache.clear()
         cache.update({entry["key"]: entry["value"] for entry in response.json()["entries"]})
@@ -215,8 +236,7 @@ def _print_values(config, keys: list, cache: dict[str, str]) -> None:
 def last(n: int = typer.Option(5, "-n", help="how many recent requests")) -> None:
     """Details of recent requests (kinds and keys, never values)."""
     config = _config()
-    _require_daemon(config)
-    for entry in reversed(daemon.admin_get(config, "last", n=n)["requests"]):
+    for entry in stats_mod.read_lines(config.requests_path, limit=n):
         stamp = time.strftime("%H:%M:%S", time.localtime(entry["ts"]))
         flags = []
         if entry["orphans"]:
@@ -239,13 +259,12 @@ def stats(
 ) -> None:
     """Detection counters, orphans, cache, latency."""
     config = _config()
-    _require_daemon(config)
     since = None
     if today:
         since = time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1))
     elif week:
         since = time.time() - 7 * 86400
-    data = daemon.admin_get(config, "stats", **({"since": since} if since else {}))
+    data = stats_mod.summary(stats_mod.read_lines(config.requests_path, since=since))
     totals = data["totals"]
 
     requests = totals.get("requests") or 0
@@ -677,7 +696,7 @@ def uninstall(yes: bool = typer.Option(False, "--yes", "-y")) -> None:
     attach_mod.detach(config)
     service.uninstall(config)
     daemon.stop(config)
-    for path in (config.pid_path, config.db_path, config.log_path):
+    for path in (config.pid_path, config.log_path):
         path.unlink(missing_ok=True)
     print("done - the config directory is left in place (remove it by hand if you want)")
 
@@ -721,6 +740,7 @@ def _format_event(event: dict) -> str:
         f"{kinds or DIM + 'none' + OFF} "
         f"restored:{event['restored']} {DIM}+{event['detect_ms']:.0f}ms{OFF}{tail}"
     )
+
 
 
 def main() -> None:

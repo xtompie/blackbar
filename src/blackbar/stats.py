@@ -1,45 +1,24 @@
-"""Event log and statistics.
+"""Request log: one line per request, appended to a plain text file.
 
-Hard rule: metrics describe events, never content. The database holds kinds, layers,
-counters and placeholder keys (which are hashes) - no values. An audit log must not
-become a new place to leak from.
+`~/.local/state/blackbar/requests.log` in logfmt, so `tail -f` on it works without
+blackbar in the loop at all. `watch`, `last` and `stats` all read this one file - there
+is no second source of truth and no database.
+
+Hard rule: the line describes the event, never the content. Kinds, layers, counters,
+timings and vault keys (which are hashes) - no values. An audit log must not become a
+new place to leak from.
 """
 
 from __future__ import annotations
 
-import sqlite3
+import os
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS requests (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts REAL NOT NULL,
-    provider TEXT NOT NULL,
-    session TEXT,
-    model TEXT,
-    streaming INTEGER NOT NULL DEFAULT 0,
-    masked INTEGER NOT NULL DEFAULT 0,
-    restored INTEGER NOT NULL DEFAULT 0,
-    orphans INTEGER NOT NULL DEFAULT 0,
-    detect_ms REAL NOT NULL DEFAULT 0,
-    total_ms REAL NOT NULL DEFAULT 0,
-    status INTEGER,
-    cache_read INTEGER,
-    cache_write INTEGER,
-    input_tokens INTEGER,
-    output_tokens INTEGER
-);
-CREATE TABLE IF NOT EXISTS detections (
-    request_id INTEGER NOT NULL,
-    kind TEXT NOT NULL,
-    layer TEXT NOT NULL,
-    count INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_requests_ts ON requests(ts);
-CREATE INDEX IF NOT EXISTS idx_detections_request ON detections(request_id);
-"""
+# Rotated to .1 above this size, one generation kept.
+MAX_BYTES = 5 * 1024 * 1024
 
 
 @dataclass
@@ -57,123 +36,168 @@ class RequestEvent:
     usage: dict = field(default_factory=dict)
     kinds: dict[str, int] = field(default_factory=dict)
     layers: dict[str, int] = field(default_factory=dict)
-    # (kind, layer) -> count - stored so you can see which layer actually does the
-    # work for which kind
-    pairs: dict[tuple[str, str], int] = field(default_factory=dict)
-    # [(kind, vault key)] for this request - published to live watchers only, never
-    # written to the database
+    # [(kind, vault key)] - lets `watch --reveal` ask the vault what was replaced,
+    # while the file itself never holds a value
     keys: list[tuple[str, str]] = field(default_factory=list)
     ts: float = field(default_factory=time.time)
     id: int | None = None
 
-    def as_dict(self) -> dict:
-        return {
-            "id": self.id,
-            "ts": self.ts,
-            "provider": self.provider,
-            "session": self.session,
-            "model": self.model,
-            "streaming": self.streaming,
-            "masked": self.masked,
-            "restored": self.restored,
-            "orphans": self.orphans,
-            "detect_ms": round(self.detect_ms, 1),
-            "total_ms": round(self.total_ms, 1),
-            "status": self.status,
-            "kinds": self.kinds,
-            "layers": self.layers,
-            "keys": [list(entry) for entry in self.keys],
-            "cache_read": self.usage.get("cache_read_input_tokens"),
-            "cache_write": self.usage.get("cache_creation_input_tokens"),
-        }
+    def to_line(self) -> str:
+        fields = [
+            ("ts", f"{self.ts:.3f}"),
+            ("id", self.id),
+            ("provider", self.provider),
+            ("session", self.session or "-"),
+            ("model", self.model or "-"),
+            ("stream", int(self.streaming)),
+            ("status", self.status if self.status is not None else "-"),
+            ("masked", self.masked),
+            ("restored", self.restored),
+            ("orphans", self.orphans),
+            ("detect_ms", f"{self.detect_ms:.1f}"),
+            ("total_ms", f"{self.total_ms:.1f}"),
+            ("kinds", _counts(self.kinds)),
+            ("layers", _counts(self.layers)),
+            ("keys", ",".join(f"{kind}:{key}" for kind, key in self.keys) or "-"),
+            ("cache_read", self.usage.get("cache_read_input_tokens") or 0),
+            ("input_tokens", self.usage.get("input_tokens") or 0),
+        ]
+        return " ".join(f"{name}={value}" for name, value in fields)
 
 
-class EventLog:
+def _counts(counts: dict[str, int]) -> str:
+    return ",".join(f"{key}:{value}" for key, value in sorted(counts.items())) or "-"
+
+
+def parse_line(line: str) -> dict | None:
+    """logfmt line -> dict. Returns None for anything that does not parse."""
+    fields = {}
+    for part in line.strip().split(" "):
+        name, sep, value = part.partition("=")
+        if sep:
+            fields[name] = value
+    if "ts" not in fields:
+        return None
+    return {
+        "ts": float(fields["ts"]),
+        "id": _int(fields.get("id")),
+        "provider": fields.get("provider", "-"),
+        "session": fields.get("session", "-"),
+        "model": fields.get("model", "-"),
+        "streaming": fields.get("stream") == "1",
+        "status": _int(fields.get("status")),
+        "masked": _int(fields.get("masked")) or 0,
+        "restored": _int(fields.get("restored")) or 0,
+        "orphans": _int(fields.get("orphans")) or 0,
+        "detect_ms": _float(fields.get("detect_ms")),
+        "total_ms": _float(fields.get("total_ms")),
+        "kinds": _pairs(fields.get("kinds")),
+        "layers": _pairs(fields.get("layers")),
+        "keys": [
+            tuple(item.split(":", 1))
+            for item in (fields.get("keys", "-") or "-").split(",")
+            if item and item != "-" and ":" in item
+        ],
+        "cache_read": _int(fields.get("cache_read")) or 0,
+        "input_tokens": _int(fields.get("input_tokens")) or 0,
+    }
+
+
+def _int(value: str | None) -> int | None:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _float(value: str | None) -> float:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _pairs(raw: str | None) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for item in (raw or "-").split(","):
+        key, sep, value = item.partition(":")
+        if sep and value.isdigit():
+            out[key] = int(value)
+    return out
+
+
+class RequestLog:
+    """Append-only writer. The daemon owns it; the CLI only reads the file."""
+
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
-        self._conn = sqlite3.connect(path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.executescript(SCHEMA)
-        self._conn.commit()
+        self._next_id = _last_id(path) + 1
 
     def record(self, event: RequestEvent) -> int:
-        usage = event.usage or {}
-        cursor = self._conn.execute(
-            """INSERT INTO requests
-               (ts, provider, session, model, streaming, masked, restored, orphans,
-                detect_ms, total_ms, status, cache_read, cache_write, input_tokens, output_tokens)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                event.ts, event.provider, event.session, event.model,
-                int(event.streaming), event.masked, event.restored, event.orphans,
-                event.detect_ms, event.total_ms, event.status,
-                usage.get("cache_read_input_tokens"), usage.get("cache_creation_input_tokens"),
-                usage.get("input_tokens"), usage.get("output_tokens"),
-            ),
+        event.id = self._next_id
+        self._next_id += 1
+        self._rotate_if_needed()
+        with self.path.open("a", encoding="utf-8") as handle:
+            handle.write(event.to_line() + "\n")
+        return event.id
+
+    def _rotate_if_needed(self) -> None:
+        try:
+            if self.path.stat().st_size < MAX_BYTES:
+                return
+        except OSError:
+            return
+        os.replace(self.path, self.path.with_suffix(".log.1"))
+
+
+def read_lines(path: Path, limit: int | None = None, since: float | None = None) -> list[dict]:
+    if not path.exists():
+        return []
+    entries = []
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            entry = parse_line(line)
+            if entry and (since is None or entry["ts"] >= since):
+                entries.append(entry)
+    return entries[-limit:] if limit else entries
+
+
+def summary(entries: list[dict]) -> dict:
+    kinds: Counter[str] = Counter()
+    layers: Counter[str] = Counter()
+    sessions: dict[str, dict] = {}
+
+    for entry in entries:
+        kinds.update(entry["kinds"])
+        layers.update(entry["layers"])
+        seen = sessions.setdefault(
+            entry["session"], {"session": entry["session"], "requests": 0, "last_ts": 0.0}
         )
-        request_id = int(cursor.lastrowid)
-        pairs = event.pairs or {(kind, "unknown"): count for kind, count in event.kinds.items()}
-        for (kind, layer), count in pairs.items():
-            self._conn.execute(
-                "INSERT INTO detections (request_id, kind, layer, count) VALUES (?,?,?,?)",
-                (request_id, kind, layer, count),
-            )
-        self._conn.commit()
-        event.id = request_id
-        return request_id
+        seen["requests"] += 1
+        seen["last_ts"] = max(seen["last_ts"], entry["ts"])
 
-    def recent(self, limit: int = 5) -> list[dict]:
-        rows = self._conn.execute(
-            "SELECT * FROM requests ORDER BY id DESC LIMIT ?", (limit,)
-        ).fetchall()
-        out = []
-        for row in rows:
-            entry = dict(row)
-            entry["kinds"] = {
-                d["kind"]: d["count"]
-                for d in self._conn.execute(
-                    "SELECT kind, SUM(count) AS count FROM detections WHERE request_id=? GROUP BY kind",
-                    (row["id"],),
-                ).fetchall()
-            }
-            out.append(entry)
-        return out
+    count = len(entries)
+    return {
+        "totals": {
+            "requests": count,
+            "sessions": len(sessions),
+            "masked": sum(e["masked"] for e in entries),
+            "restored": sum(e["restored"] for e in entries),
+            "orphans": sum(e["orphans"] for e in entries),
+            "detect_ms": (sum(e["detect_ms"] for e in entries) / count) if count else 0.0,
+            "total_ms": (sum(e["total_ms"] for e in entries) / count) if count else 0.0,
+            "cache_read": sum(e["cache_read"] for e in entries),
+            "input_tokens": sum(e["input_tokens"] for e in entries),
+        },
+        "kinds": dict(kinds.most_common()),
+        "layers": dict(layers.most_common()),
+        "sessions": sorted(sessions.values(), key=lambda s: -s["requests"]),
+    }
 
-    def summary(self, since: float | None = None) -> dict:
-        where = "WHERE ts >= ?" if since else ""
-        args = (since,) if since else ()
-        totals = self._conn.execute(
-            f"""SELECT COUNT(*) AS requests, SUM(masked) AS masked, SUM(restored) AS restored,
-                       SUM(orphans) AS orphans, AVG(detect_ms) AS detect_ms, AVG(total_ms) AS total_ms,
-                       SUM(cache_read) AS cache_read, SUM(input_tokens) AS input_tokens,
-                       COUNT(DISTINCT session) AS sessions
-                FROM requests {where}""",
-            args,
-        ).fetchone()
-        kinds = self._conn.execute(
-            f"""SELECT kind, SUM(count) AS count FROM detections
-                {"WHERE request_id IN (SELECT id FROM requests WHERE ts >= ?)" if since else ""}
-                GROUP BY kind ORDER BY count DESC""",
-            args,
-        ).fetchall()
-        layers = self._conn.execute(
-            f"""SELECT layer, SUM(count) AS count FROM detections
-                {"WHERE request_id IN (SELECT id FROM requests WHERE ts >= ?)" if since else ""}
-                GROUP BY layer ORDER BY count DESC""",
-            args,
-        ).fetchall()
-        sessions = self._conn.execute(
-            f"""SELECT session, COUNT(*) AS requests, MAX(ts) AS last_ts
-                FROM requests {where} GROUP BY session ORDER BY requests DESC""",
-            args,
-        ).fetchall()
-        return {
-            "totals": dict(totals) if totals else {},
-            "kinds": {row["kind"]: row["count"] for row in kinds},
-            "layers": {row["layer"]: row["count"] for row in layers},
-            "sessions": [dict(row) for row in sessions],
-        }
 
-    def close(self) -> None:
-        self._conn.close()
+def _last_id(path: Path) -> int:
+    for entry in reversed(read_lines(path, limit=50)):
+        if entry["id"]:
+            return entry["id"]
+    return 0

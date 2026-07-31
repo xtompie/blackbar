@@ -66,32 +66,31 @@ is written to disk, so restarting the daemon starts from scratch.
 
 ## Watching what happens
 
+The daemon appends one line per request to `~/.local/state/blackbar/requests.log`:
+
+```
+ts=1785529390.169 id=1 provider=anthropic session=c87238 model=claude-opus-5 stream=0
+status=401 masked=2 restored=0 orphans=0 detect_ms=1.4 total_ms=5528.8
+kinds=aws_key:1,email:1 layers=regex:2 keys=email:e09c6b,aws_key:8b4c78 cache_read=0
+```
+
+That is the whole mechanism - a text file. `tail -f`, `grep`, anything you already use
+works on it, blackbar included:
+
 ```bash
-blackbar watch             # one line per request, live
+blackbar watch             # tail -f with the fields laid out for reading
 blackbar watch --reveal    # ⚠ also prints the actual values that were replaced
-```
-
-`watch` opens an HTTP connection to the daemon's own admin endpoint and listens; the
-daemon pushes an event after finishing each request. Nothing is being intercepted or
-sniffed - it is the same process reporting on itself, so you only see traffic that
-actually went through the proxy.
-
-```
-14:02:11 anthropic #83 email:3  person:2  restored:6 +120ms
-    email        jan@acme.com    → {{sensitive:email:a1b2c3}}     (with --reveal)
-```
-
-```bash
-blackbar last -n 5         # the same events, after the fact
+blackbar last -n 5         # the last few lines
 blackbar stats --today     # totals per kind and layer
-blackbar status            # is it running, which model, how many sessions
 ```
 
-`last` and `stats` read an SQLite file at `~/.local/state/blackbar/events.db`, so they
-survive restarts. That file holds kinds, layers, counters and timings - **never
-content**. An audit log must not become a new place to leak from. The only commands
-that ever print real values are `watch --reveal` and `vault show`, both of which say so
-before doing it.
+The line says what happened, never what was in it: kinds, layers, counters, timings and
+vault keys, which are hashes. `--reveal` resolves those keys by asking the running
+daemon, because only its memory holds the values - the file never does. It and
+`vault show` are the only commands that print real data, and both say so first.
+
+If the log shows nothing while a Claude Code window is running, that window is not going
+through the proxy.
 
 ## What gets detected
 
