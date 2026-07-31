@@ -9,20 +9,7 @@ and addresses do not follow a pattern, so a regex will not catch them, and shipp
 text to a cloud classifier would just move the leak to another vendor. Nothing leaves
 the machine, not even the step that decides what is confidential.
 
-![blackbar replacing an address and a name on the way out, and putting them back in the reply](demo/blackbar-demo.gif)
-
-```
-you write       send the July invoice to jan@fhu.pl, cc Anna Kowalska
-
-what leaves     send the July invoice to {{sensitive:email:e09c6b}},
-your machine    cc {{sensitive:person:8b4c78}}
-
-what comes      Drafted it. Sending to jan@fhu.pl, with Anna Kowalska
-back to you     in copy.
-```
-
-The daemon sits on `127.0.0.1:8555`; Claude Code talks to it instead of
-`api.anthropic.com`. Everything else about the request goes upstream untouched.
+![Values are replaced on the way out and restored on the way back; the real ones never cross the bar](demo/blackbar-demo.gif)
 
 ## Install
 
