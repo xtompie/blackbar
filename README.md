@@ -15,7 +15,7 @@ Claude Code ──► blackbar (127.0.0.1:8555) ──► api.anthropic.com
 Paste this into Claude Code, in any directory:
 
 ```
-Install blackbar for me: <REPO-URL>.
+Install blackbar for me: https://github.com/xtompie/blackbar
 Clone the repo, read INSTALL.md and follow the installation step by step.
 ```
 
