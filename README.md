@@ -4,11 +4,25 @@ A local proxy that strips confidential data out of the traffic Claude Code sends
 puts it back in the reply. The model in the cloud never sees the real values, while on
 your machine everything reads normally.
 
+The finding is done by a model too - a local one, running on your CPU. Names, companies
+and addresses do not follow a pattern, so a regex will not catch them, and shipping the
+text to a cloud classifier would just move the leak to another vendor. Nothing leaves
+the machine, not even the step that decides what is confidential.
+
+![blackbar replacing an address and a name on the way out, and putting them back in the reply](demo/blackbar-demo.gif)
+
 ```
-Claude Code ──► blackbar (127.0.0.1:8555) ──► api.anthropic.com
-     ▲                │   emails, names, keys → {{sensitive:...}}
-     └────────────────┘   {{sensitive:...}} → originals
+you write       send the July invoice to jan@fhu.pl, cc Anna Kowalska
+
+what leaves     send the July invoice to {{sensitive:email:e09c6b}},
+your machine    cc {{sensitive:person:8b4c78}}
+
+what comes      Drafted it. Sending to jan@fhu.pl, with Anna Kowalska
+back to you     in copy.
 ```
+
+The daemon sits on `127.0.0.1:8555`; Claude Code talks to it instead of
+`api.anthropic.com`. Everything else about the request goes upstream untouched.
 
 ## Install
 

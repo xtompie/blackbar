@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>blackbar demo</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#151515; --line:#2a2a2a;
+    --text:#e6e6e6; --dim:#7d7d7d; --coral:#d97757; --code:#9a9a9a;
+    --mask:#5b8db8; --mono:"SF Mono","JetBrains Mono",Menlo,ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);}
+  #stage{
+    width:1200px;height:540px;background:var(--bg);color:var(--text);
+    font-family:var(--mono);font-size:15px;line-height:1.55;
+    display:flex;flex-direction:column;overflow:hidden;
+  }
+  .topbar{
+    height:34px;flex:0 0 34px;display:flex;align-items:center;gap:8px;
+    padding:0 18px;color:var(--dim);font-size:12.5px;border-bottom:1px solid var(--line);
+  }
+  .topbar .mark{color:var(--coral)}
+  .topbar .right{margin-left:auto}
+  .cols{flex:1;display:flex;min-height:0}
+  .col{flex:1;padding:20px 22px;overflow:hidden;display:flex;flex-direction:column}
+  .col+.col{border-left:1px solid var(--line)}
+  .label{font-size:12px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase;margin-bottom:14px}
+  .label b{color:var(--text);font-weight:600;letter-spacing:0}
+  .inputbox{
+    border:1px solid var(--line);border-radius:8px;padding:9px 12px;
+    display:flex;gap:9px;align-items:baseline;background:var(--panel);
+  }
+  .prompt{color:var(--coral);font-weight:600}
+  .typed{white-space:pre-wrap;word-break:break-word}
+  .caret{display:inline-block;width:8px;height:16px;background:var(--coral);
+    transform:translateY(2px);animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+  .wire{
+    border:1px solid var(--line);border-radius:8px;padding:9px 12px;background:var(--panel);
+    color:var(--code);font-size:14px;white-space:pre-wrap;word-break:break-word;
+  }
+  .wire .meta{color:var(--dim);font-size:12.5px;display:block;margin-bottom:6px}
+  .step{opacity:0;transform:translateY(4px);transition:opacity .3s, transform .3s}
+  .step.show{opacity:1;transform:none}
+  .resp{margin-top:16px}
+  .resp .who{color:var(--coral);margin-bottom:4px}
+  .mask{color:var(--mask)}
+  .real{color:var(--text)}
+  .muted{color:var(--dim)}
+  .foot{
+    flex:0 0 126px;border-top:1px solid var(--line);padding:12px 22px;
+    font-size:13px;color:var(--dim);overflow:hidden;background:#0d0d0d;
+  }
+  .foot .cmd{color:var(--text);margin-bottom:8px}
+  .foot .cmd .p{color:var(--coral)}
+  .logline{opacity:0;transition:opacity .25s;white-space:pre;font-size:12.5px;line-height:1.7}
+  .logline.show{opacity:1}
+  .logline .k{color:var(--code)}
+  .logline .v{color:var(--mask)}
+  .logline .r{color:var(--text)}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="topbar">
+    <span class="mark">▮</span> blackbar
+    <span class="right">127.0.0.1:8555 → api.anthropic.com</span>
+  </div>
+
+  <div class="cols">
+    <!-- LEFT: your machine -->
+    <div class="col">
+      <div class="label">on <b>your machine</b></div>
+      <div class="inputbox">
+        <span class="prompt">❯</span>
+        <span class="typed" id="typed"></span><span class="caret" id="caret"></span>
+      </div>
+      <div class="resp step" id="answer">
+        <div class="who">✻ Claude</div>
+        <div>Drafted it. Sending to <span class="real">jan@fhu.pl</span>, with <span class="real">Anna Kowalska</span> in copy.</div>
+      </div>
+    </div>
+
+    <!-- RIGHT: what leaves -->
+    <div class="col">
+      <div class="label">what <b>leaves your machine</b></div>
+      <div class="wire step" id="sent"><span class="meta">POST api.anthropic.com/v1/messages</span>send the July invoice to <span class="mask">{{sensitive:email:e09c6b}}</span>, cc <span class="mask">{{sensitive:person:8b4c78}}</span></div>
+      <div class="resp step" id="reply">
+        <div class="who muted">✻ model reply</div>
+        <div class="wire">Drafted it. Sending to <span class="mask">{{sensitive:email:e09c6b}}</span>, with <span class="mask">{{sensitive:person:8b4c78}}</span> in copy.</div>
+      </div>
+      <div class="step muted" id="never" style="margin-top:16px;font-size:13px">
+        the address and the name never left this machine
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div class="cmd"><span class="p">❯</span> blackbar watch --reveal</div>
+    <div class="logline" id="l1"><span class="k">22:41:07 anthropic #1  email:1  person:1  restored:2  +14ms</span></div>
+    <div class="logline" id="l2">    <span class="k">email  </span> <span class="r">jan@fhu.pl</span>      <span class="k">→</span> <span class="v">{{sensitive:email:e09c6b}}</span></div>
+    <div class="logline" id="l3">    <span class="k">person </span> <span class="r">Anna Kowalska</span>   <span class="k">→</span> <span class="v">{{sensitive:person:8b4c78}}</span></div>
+  </div>
+</div>
+
+<script>
+const TEXT = "send the July invoice to jan@fhu.pl, cc Anna Kowalska";
+const typed = document.getElementById("typed");
+const caret = document.getElementById("caret");
+const show = id => document.getElementById(id).classList.add("show");
+
+// Deterministic timeline so the recording is reproducible frame for frame.
+function run(){
+  typed.textContent = "";
+  caret.style.display = "inline-block";
+  ["answer","sent","reply","never","l1","l2","l3"].forEach(
+    id => document.getElementById(id).classList.remove("show"));
+
+  let i = 0;
+  const type = setInterval(() => {
+    typed.textContent = TEXT.slice(0, ++i);
+    if (i >= TEXT.length){
+      clearInterval(type);
+      caret.style.display = "none";
+      setTimeout(() => show("sent"), 400);
+      setTimeout(() => show("l1"), 900);
+      setTimeout(() => show("l2"), 1150);
+      setTimeout(() => show("l3"), 1350);
+      setTimeout(() => show("reply"), 2100);
+      setTimeout(() => show("answer"), 2700);
+      setTimeout(() => show("never"), 3300);
+      setTimeout(run, 6000);
+    }
+  }, 38);
+}
+run();
+</script>
+</body>
+</html>
