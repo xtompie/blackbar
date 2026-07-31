@@ -42,7 +42,7 @@ def is_attached(config: Config, path: Path = SETTINGS_PATH) -> bool:
 def preview(config: Config, path: Path = SETTINGS_PATH) -> str:
     settings = read_settings(path)
     env = dict(settings.get("env") or {})
-    env[ENV_KEY] = config.provider_url("anthropic")
+    env[ENV_KEY] = config.base_url
     settings["env"] = env
     return json.dumps(settings, indent=2, ensure_ascii=False)
 
@@ -58,7 +58,7 @@ def attach(config: Config, path: Path = SETTINGS_PATH) -> Path | None:
         path.parent.mkdir(parents=True, exist_ok=True)
 
     env = dict(settings.get("env") or {})
-    env[ENV_KEY] = config.provider_url("anthropic")
+    env[ENV_KEY] = config.base_url
     settings["env"] = env
     path.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return backup

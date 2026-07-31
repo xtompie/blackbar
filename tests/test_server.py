@@ -14,7 +14,7 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
-from blackbar.config import Config, Provider
+from blackbar.config import Config
 from blackbar.server import create_app
 from blackbar.stats import read_lines
 
@@ -72,12 +72,13 @@ def proxy(tmp_path, monkeypatch):
 
     upstream = Starlette(routes=[
         Route("/v1/messages", _upstream_json, methods=["POST"]),
+        Route("/v1/messages/count_tokens", _upstream_json, methods=["POST"]),
         Route("/{path:path}", _upstream_other, methods=["GET", "POST"]),
     ])
 
     config = Config(
         layers=["rules", "regex"],  # no GLiNER: keeps the test fast and download-free
-        providers={"anthropic": Provider("anthropic", "/anthropic", "http://upstream.test")},
+        upstream="http://upstream.test",
     )
     app = create_app(config)
     app.state.proxy.client = httpx.AsyncClient(transport=httpx.ASGITransport(upstream))
@@ -90,7 +91,7 @@ async def _call(app, path, **kwargs):
 
 
 async def test_upstream_never_sees_the_original_but_client_does(proxy):
-    response = await _call(proxy, "/anthropic/v1/messages", json={
+    response = await _call(proxy, "/v1/messages", json={
         "model": "claude-opus-5",
         "messages": [{"role": "user", "content": "write to jan@example.com"}],
     })
@@ -105,7 +106,7 @@ async def test_upstream_never_sees_the_original_but_client_does(proxy):
 
 async def test_streaming_reassembles_split_placeholder(proxy):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(proxy), base_url="http://proxy") as client:
-        async with client.stream("POST", "/anthropic/v1/messages", json={
+        async with client.stream("POST", "/v1/messages", json={
             "model": "claude-opus-5",
             "stream": True,
             "messages": [{"role": "user", "content": "contact: jan@example.com"}],
@@ -120,7 +121,7 @@ async def test_streaming_reassembles_split_placeholder(proxy):
 async def test_api_error_is_restored_too(proxy):
     """An error with stream=true comes back as JSON - no placeholder may reach the client."""
     async with httpx.AsyncClient(transport=httpx.ASGITransport(proxy), base_url="http://proxy") as client:
-        async with client.stream("POST", "/anthropic/v1/messages", json={
+        async with client.stream("POST", "/v1/messages", json={
             "model": "boom",
             "stream": True,
             "messages": [{"role": "user", "content": "contact: jan@example.com"}],
@@ -132,21 +133,36 @@ async def test_api_error_is_restored_too(proxy):
     assert "{{sensitive:" not in body
 
 
-async def test_unknown_provider_is_404(proxy):
-    response = await _call(proxy, "/gemini/v1/messages", json={})
-    assert response.status_code == 404
+async def test_unhandled_post_is_refused_not_forwarded(proxy):
+    """An endpoint we cannot redact must not carry data out behind our back."""
+    SEEN.clear()
+    response = await _call(proxy, "/v1/experimental/thing", json={
+        "messages": [{"role": "user", "content": "write to jan@example.com"}],
+    })
+    assert response.status_code == 501
+    assert response.json()["error"]["type"] == "blackbar_unhandled_endpoint"
+    assert "body" not in SEEN
+
+
+async def test_count_tokens_is_redacted(proxy):
+    """Same payload as /v1/messages, so it goes through the same redaction."""
+    await _call(proxy, "/v1/messages/count_tokens", json={
+        "model": "claude-opus-5",
+        "messages": [{"role": "user", "content": "write to jan@example.com"}],
+    })
+    assert "jan@example.com" not in json.dumps(SEEN["body"])
 
 
 async def test_other_paths_pass_through(proxy):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(proxy), base_url="http://proxy") as client:
-        response = await client.get("/anthropic/v1/models")
+        response = await client.get("/v1/models")
     assert response.status_code == 200
     assert response.json()["path"] == "/v1/models"
 
 
 async def test_request_lands_in_the_log_file(proxy):
     """One line per request, readable with tail - and carrying no values."""
-    await _call(proxy, "/anthropic/v1/messages", json={
+    await _call(proxy, "/v1/messages", json={
         "model": "claude-opus-5",
         "messages": [{"role": "user", "content": "write to jan@example.com"}],
     })

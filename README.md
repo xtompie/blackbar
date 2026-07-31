@@ -142,8 +142,12 @@ want it anyway, `blackbar attach --force` does it and says what you are taking o
   gated to `api.anthropic.com`).
 - Redaction changes the prompt, so the first request after a rules change misses the
   prompt cache.
-- A model can mangle a placeholder in its reply. Those are counted as **orphans** in
-  `blackbar stats`; every one of them may have landed in a file on disk.
+- A model can mangle a placeholder in its reply - asking it to translate the text is the
+  easy way to trigger this. The real value never left the machine, so the point still
+  stands, but the reply comes back with `{{sensitive:...}}` in it. Those are counted as
+  **orphans** in `blackbar stats`.
+- Only `/v1/messages` and `/v1/messages/count_tokens` are redacted. Any other POST to the
+  API is refused with `blackbar_unhandled_endpoint` rather than forwarded unredacted.
 
 ## License
 

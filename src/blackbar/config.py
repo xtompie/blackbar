@@ -26,13 +26,8 @@ threshold = 0.5
 # layers in priority order; drop "gliner" to run on rules and regexes only
 layers = ["rules", "regex", "gliner"]
 
-[providers.anthropic]
-prefix = "/anthropic"
-upstream = "https://api.anthropic.com"
-
-[providers.openai]
-prefix = "/openai"
-upstream = "https://api.openai.com"
+[upstream]
+url = "https://api.anthropic.com"
 """
 
 
@@ -52,13 +47,6 @@ def data_dir() -> Path:
 
 
 @dataclass
-class Provider:
-    name: str
-    prefix: str
-    upstream: str
-
-
-@dataclass
 class Config:
     host: str = "127.0.0.1"
     port: int = 8555
@@ -66,7 +54,7 @@ class Config:
     model: str = "urchade/gliner_multi_pii-v1"
     threshold: float = 0.5
     layers: list[str] = field(default_factory=lambda: ["rules", "regex", "gliner"])
-    providers: dict[str, Provider] = field(default_factory=dict)
+    upstream: str = "https://api.anthropic.com"
     path: Path = field(default_factory=lambda: config_dir() / "config.toml")
 
     @property
@@ -94,22 +82,10 @@ class Config:
     def install_report_path(self) -> Path:
         return config_dir() / "install-report.md"
 
-    def provider_url(self, name: str) -> str:
-        provider = self.providers.get(name)
-        prefix = provider.prefix if provider else f"/{name}"
-        return f"{self.base_url}{prefix}"
-
-
-def default_providers() -> dict[str, Provider]:
-    return {
-        "anthropic": Provider("anthropic", "/anthropic", "https://api.anthropic.com"),
-        "openai": Provider("openai", "/openai", "https://api.openai.com"),
-    }
-
 
 def load(path: Path | None = None) -> Config:
     path = path or config_dir() / "config.toml"
-    config = Config(path=path, providers=default_providers())
+    config = Config(path=path)
     if not path.exists():
         return config
 
@@ -128,12 +104,8 @@ def load(path: Path | None = None) -> Config:
     config.threshold = float(detection.get("threshold", config.threshold))
     config.layers = [str(layer) for layer in detection.get("layers", config.layers)]
 
-    for name, entry in (data.get("providers") or {}).items():
-        config.providers[name] = Provider(
-            name=name,
-            prefix=str(entry.get("prefix", f"/{name}")),
-            upstream=str(entry.get("upstream", "")).rstrip("/"),
-        )
+    upstream = data.get("upstream") or {}
+    config.upstream = str(upstream.get("url", config.upstream)).rstrip("/")
     return config
 
 

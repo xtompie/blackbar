@@ -97,7 +97,7 @@ project codes). Put whatever they name into `rules.yaml`, under `terms` or `patt
 
 ## Step 4 — the model
 
-The default model is `urchade/gliner_multi_pii-v1` (~500 MB, multilingual).
+The default model is `urchade/gliner_multi_pii-v1` (1.2 GB on disk, multilingual).
 
 ```bash
 blackbar model list     # variants and sizes
@@ -108,7 +108,7 @@ Before downloading: check whether Hugging Face has a newer variant of that famil
 (`gliner_multi_pii`). If there is one and it looks stable, offer it instead of the
 default - this file may not have been updated in a long time.
 
-Run the 500 MB download so the user can see progress. Do not treat the step as done
+Run the download so the user can see progress - it is over a gigabyte. Do not treat the step as done
 until `blackbar model status` confirms the size on disk.
 
 **Verify:**

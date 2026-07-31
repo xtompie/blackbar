@@ -25,6 +25,10 @@ from .sse import SSERewriter
 from .stats import RequestEvent, RequestLog, read_lines, summary
 from .vault import Vault
 
+# Endpoints that carry a prompt and are therefore redacted. Anything else that could
+# carry one is refused rather than guessed at - see _handle_unhandled.
+REDACTED_PATHS = {"/v1/messages", "/v1/messages/count_tokens"}
+
 # Headers that must not be forwarded - they describe a single connection.
 HOP_BY_HOP = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -89,6 +93,9 @@ def _routes(state: ProxyState) -> list[Route]:
     async def passthrough(request: Request) -> Response:
         return await _handle_passthrough(state, request)
 
+    async def unhandled(request: Request) -> Response:
+        return _refuse(request)
+
     return [
         Route("/_admin/health", _admin_health(state), methods=["GET"]),
         Route("/_admin/status", _admin_status(state), methods=["GET"]),
@@ -98,14 +105,27 @@ def _routes(state: ProxyState) -> list[Route]:
         Route("/_admin/vault/clear", _admin_vault_clear(state), methods=["POST"]),
         Route("/_admin/rules/reload", _admin_rules_reload(state), methods=["POST"]),
         Route("/_admin/test", _admin_test(state), methods=["POST"]),
-        Route("/{provider}/v1/messages", messages, methods=["POST"]),
-        Route("/{provider}/{path:path}", passthrough, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]),
+        Route("/v1/messages", messages, methods=["POST"]),
+        Route("/v1/messages/count_tokens", messages, methods=["POST"]),
+        # Reads cannot carry a prompt in the body, so they pass through.
+        Route("/{path:path}", passthrough, methods=["GET", "HEAD", "OPTIONS"]),
+        # Anything else might carry one. We do not guess: we say we do not handle it.
+        Route("/{path:path}", unhandled, methods=["POST", "PUT", "PATCH", "DELETE"]),
     ]
 
 
-def _upstream(state: ProxyState, provider: str) -> str | None:
-    entry = state.config.providers.get(provider)
-    return entry.upstream if entry else None
+def _refuse(request: Request) -> Response:
+    """An endpoint we do not redact must not carry data out behind our back."""
+    return JSONResponse(
+        {"error": {
+            "type": "blackbar_unhandled_endpoint",
+            "message": (
+                f"blackbar does not handle {request.method} {request.url.path}, so it cannot "
+                f"redact it. Run `blackbar direct claude` to bypass the proxy for one session."
+            ),
+        }},
+        status_code=501,
+    )
 
 
 def _forward_headers(request: Request) -> dict[str, str]:
@@ -127,20 +147,15 @@ def _response_headers(upstream: httpx.Response) -> dict[str, str]:
 
 
 async def _handle_messages(state: ProxyState, request: Request) -> Response:
-    provider = request.path_params["provider"]
-    upstream_base = _upstream(state, provider)
-    if upstream_base is None:
-        return JSONResponse({"error": f"unknown provider: {provider}"}, status_code=404)
-
     raw = await request.body()
     try:
         body: dict[str, Any] = json.loads(raw)
     except json.JSONDecodeError:
-        return await _proxy_raw(state, request, upstream_base, raw)
+        return _refuse(request)
 
     started = time.perf_counter()
     event = RequestEvent(
-        provider=provider,
+        provider="anthropic",
         model=str(body.get("model") or ""),
         streaming=bool(body.get("stream")),
         session=session_key(body, request.headers.get("user-agent", "")),
@@ -155,7 +170,7 @@ async def _handle_messages(state: ProxyState, request: Request) -> Response:
     event.keys = keys
     payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
 
-    url = f"{upstream_base}{request.url.path[len('/' + provider):]}"
+    url = f"{state.config.upstream}{request.url.path}"
     if request.url.query:
         url = f"{url}?{request.url.query}"
     headers = _forward_headers(request)
@@ -261,18 +276,12 @@ async def _stream_response(
 
 
 async def _handle_passthrough(state: ProxyState, request: Request) -> Response:
-    provider = request.path_params["provider"]
-    upstream_base = _upstream(state, provider)
-    if upstream_base is None:
-        return JSONResponse({"error": f"unknown provider: {provider}"}, status_code=404)
     raw = await request.body()
-    return await _proxy_raw(state, request, upstream_base, raw)
+    return await _proxy_raw(state, request, raw)
 
 
-async def _proxy_raw(state: ProxyState, request: Request, upstream_base: str, raw: bytes) -> Response:
-    provider = request.path_params["provider"]
-    path = request.url.path[len("/" + provider) :]
-    url = f"{upstream_base}{path}"
+async def _proxy_raw(state: ProxyState, request: Request, raw: bytes) -> Response:
+    url = f"{state.config.upstream}{request.url.path}"
     if request.url.query:
         url = f"{url}?{request.url.query}"
     try:
@@ -313,7 +322,7 @@ def _admin_status(state: ProxyState):
             "rules_error": state.rules.error,
             "vault": state.vault.stats(),
             "sessions_last_hour": recent["sessions"],
-            "providers": {name: p.upstream for name, p in state.config.providers.items()},
+            "upstream": state.config.upstream,
         })
     return handler
 

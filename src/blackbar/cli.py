@@ -53,13 +53,7 @@ def _require_daemon(config) -> None:
 @app.command(context_settings=PASSTHROUGH)
 def claude(ctx: typer.Context) -> None:
     """Run claude through the proxy (arguments are passed verbatim)."""
-    raise typer.Exit(launcher.launch(_config(), "anthropic", ctx.args))
-
-
-@app.command(context_settings=PASSTHROUGH)
-def codex(ctx: typer.Context) -> None:
-    """Run codex through the proxy."""
-    raise typer.Exit(launcher.launch(_config(), "openai", ctx.args))
+    raise typer.Exit(launcher.launch(_config(), ctx.args))
 
 
 @app.command(context_settings=PASSTHROUGH)
@@ -413,9 +407,9 @@ model_app = typer.Typer(help="GLiNER model.", no_args_is_help=True)
 app.add_typer(model_app, name="model")
 
 KNOWN_MODELS = [
-    ("urchade/gliner_multi_pii-v1", "~500 MB", "default, multilingual, PII entity types"),
-    ("urchade/gliner_small-v2.1", "~150 MB", "for low RAM; weaker outside English"),
-    ("urchade/gliner_large-v2.1", "~1.5 GB", "best quality, slower"),
+    ("urchade/gliner_multi_pii-v1", "1.2 GB", "default, multilingual, PII entity types"),
+    ("urchade/gliner_small-v2.1", "~500 MB", "for low RAM; weaker outside English"),
+    ("urchade/gliner_large-v2.1", "~2 GB", "best quality, slower"),
 ]
 
 
@@ -599,6 +593,7 @@ def config_get(key: str = typer.Argument(None)) -> None:
         "detection.model": config.model,
         "detection.threshold": config.threshold,
         "detection.layers": config.layers,
+        "upstream.url": config.upstream,
     }
     if key not in values:
         _die(f"unknown key: {key}")
@@ -653,15 +648,12 @@ def doctor() -> None:
         check("rules loaded", not data.get("rules_error"), data.get("rules_error") or f"{data['rules_count']}")
     import httpx
 
-    for name, provider in config.providers.items():
-        if not provider.upstream:
-            continue
-        try:
-            response = httpx.get(f"{provider.upstream}/v1/models", timeout=5)
-            reachable = response.status_code < 500
-        except httpx.HTTPError:
-            reachable = False
-        check(f"upstream {name}", reachable, provider.upstream, warn=not reachable)
+    try:
+        response = httpx.get(f"{config.upstream}/v1/models", timeout=5)
+        reachable = response.status_code < 500
+    except httpx.HTTPError:
+        reachable = False
+    check("upstream", reachable, config.upstream, warn=not reachable)
 
     attached = attach_mod.is_attached(config)
     installed = service.installed()

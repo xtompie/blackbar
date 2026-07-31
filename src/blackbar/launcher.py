@@ -13,26 +13,12 @@ import sys
 from .config import Config
 from . import daemon
 
-# The environment variable each client reads as its API base URL.
-ENV_VAR = {
-    "anthropic": "ANTHROPIC_BASE_URL",
-    "openai": "OPENAI_BASE_URL",
-}
-
-# Default executable per provider.
-BINARY = {
-    "anthropic": "claude",
-    "openai": "codex",
-}
+# The variable Claude Code reads as its API base URL.
+ENV_VAR = "ANTHROPIC_BASE_URL"
+BINARY = "claude"
 
 
-def launch(config: Config, provider: str, args: list[str], *, quiet: bool = False) -> int:
-    binary = BINARY.get(provider, provider)
-    env_var = ENV_VAR.get(provider)
-    if env_var is None:
-        print(f"blackbar: unknown provider '{provider}'", file=sys.stderr)
-        return 2
-
+def launch(config: Config, args: list[str], *, quiet: bool = False) -> int:
     if not daemon.is_running(config):
         if not config.autostart:
             print(
@@ -50,18 +36,18 @@ def launch(config: Config, provider: str, args: list[str], *, quiet: bool = Fals
             )
             return 1
 
-    url = config.provider_url(provider)
+    url = config.base_url
     env = dict(os.environ)
-    env[env_var] = url
+    env[ENV_VAR] = url
     env["BLACKBAR_ACTIVE"] = "1"
 
     if not quiet:
         print(f"\033[90m▮ blackbar → {url}\033[0m", file=sys.stderr)
 
     try:
-        os.execvpe(binary, [binary, *args], env)
+        os.execvpe(BINARY, [BINARY, *args], env)
     except FileNotFoundError:
-        print(f"blackbar: '{binary}' not found in PATH", file=sys.stderr)
+        print(f"blackbar: '{BINARY}' not found in PATH", file=sys.stderr)
         return 127
     return 0
 
@@ -69,8 +55,7 @@ def launch(config: Config, provider: str, args: list[str], *, quiet: bool = Fals
 def launch_direct(binary: str, args: list[str]) -> int:
     """Escape hatch: run a client with the proxy bypassed."""
     env = dict(os.environ)
-    for name in ENV_VAR.values():
-        env.pop(name, None)
+    env.pop(ENV_VAR, None)
     env.pop("BLACKBAR_ACTIVE", None)
     try:
         os.execvpe(binary, [binary, *args], env)
