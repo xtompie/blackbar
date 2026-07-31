@@ -166,6 +166,10 @@ running, `blackbar service uninstall` leaves the settings entry alone, and
 `blackbar attach --force` wires things up with no service at all. The user can rearrange
 this later without reinstalling anything.
 
+There is no pause command and none should be added: a global switch that turns redaction
+off while everything still looks like it is working is the one failure mode this tool
+exists to prevent. Per-run bypass is `blackbar direct claude`.
+
 For option 3, say this before doing it: from that point on, a dead daemon means `claude`
 will not start at all (by design - the alternative is silently sending data out
 unredacted). The escape hatches are `blackbar direct claude` and `blackbar detach`.

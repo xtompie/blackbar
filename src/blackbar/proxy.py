@@ -18,15 +18,26 @@ from .detect import Redactor
 from .vault import Vault
 
 
-async def redact_request(body: dict, redactor: Redactor) -> tuple[Counter[str], Counter[str], int]:
-    """Redacts the body in place. Returns (kinds, layers, number of replacements)."""
+async def redact_request(
+    body: dict, redactor: Redactor
+) -> tuple[Counter[str], Counter[str], int, list[tuple[str, str]]]:
+    """Redacts the body in place.
+
+    Returns (kinds, layers, replacement count, [(kind, vault key)]).
+    """
     kinds: Counter[str] = Counter()
     layers: Counter[str] = Counter()
+    keys: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
 
     async def scan(text: str) -> str:
-        masked, hit_kinds, hit_layers = await redactor.redact(text)
+        masked, hit_kinds, hit_layers, hit_keys = await redactor.redact(text)
         kinds.update(hit_kinds)
         layers.update(hit_layers)
+        for entry in hit_keys:
+            if entry not in seen:
+                seen.add(entry)
+                keys.append(entry)
         return masked
 
     system = body.get("system")
@@ -47,7 +58,7 @@ async def redact_request(body: dict, redactor: Redactor) -> tuple[Counter[str], 
             for block in content:
                 await _scan_block(block, scan)
 
-    return kinds, layers, sum(kinds.values())
+    return kinds, layers, sum(kinds.values()), keys
 
 
 async def _scan_block(block: dict, scan) -> None:

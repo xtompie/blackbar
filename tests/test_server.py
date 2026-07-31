@@ -131,15 +131,6 @@ async def test_api_error_is_restored_too(proxy):
     assert "{{sensitive:" not in body
 
 
-async def test_pause_passes_traffic_unredacted(proxy):
-    proxy.state.proxy.paused = True
-    await _call(proxy, "/anthropic/v1/messages", json={
-        "model": "claude-opus-5",
-        "messages": [{"role": "user", "content": "write to jan@example.com"}],
-    })
-    assert "jan@example.com" in SEEN["body"]["messages"][0]["content"]
-
-
 async def test_unknown_provider_is_404(proxy):
     response = await _call(proxy, "/gemini/v1/messages", json={})
     assert response.status_code == 404

@@ -67,7 +67,7 @@ def test_broken_regex_does_not_kill_the_layer(tmp_path):
 async def test_redactor_replaces_and_counts(tmp_path):
     vault = Vault()
     redactor = Redactor(vault, RulesDetector(tmp_path / "missing.yaml"))
-    masked, hit_kinds, hit_layers = await redactor.redact("write to jan@example.com")
+    masked, hit_kinds, hit_layers, _ = await redactor.redact("write to jan@example.com")
     assert "jan@example.com" not in masked
     assert hit_kinds["email"] == 1
     assert hit_layers["regex"] == 1
@@ -77,8 +77,8 @@ async def test_same_text_gives_same_result(tmp_path):
     """Determinism is what makes prompt caching survive redaction."""
     vault = Vault()
     redactor = Redactor(vault, RulesDetector(tmp_path / "missing.yaml"))
-    first, _, _ = await redactor.redact("contact: jan@example.com, tel 501 234 567")
-    second, _, _ = await redactor.redact("contact: jan@example.com, tel 501 234 567")
+    first, *_ = await redactor.redact("contact: jan@example.com, tel 501 234 567")
+    second, *_ = await redactor.redact("contact: jan@example.com, tel 501 234 567")
     assert first == second
 
 
@@ -86,7 +86,7 @@ async def test_restore_undoes_redaction(tmp_path):
     vault = Vault()
     redactor = Redactor(vault, RulesDetector(tmp_path / "missing.yaml"))
     original = "write to jan@example.com or anna@example.de"
-    masked, _, _ = await redactor.redact(original)
+    masked, *_ = await redactor.redact(original)
     restored, count, orphans = vault.restore(masked)
     assert restored == original
     assert count == 2

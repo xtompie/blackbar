@@ -22,7 +22,7 @@ async def test_redacts_system_and_messages(tmp_path):
             {"role": "user", "content": "send the invoice to anna@example.de"},
         ],
     }
-    kinds, layers, masked = await redact_request(body, redactor)
+    kinds, layers, masked, keys = await redact_request(body, redactor)
     assert masked == 2
     assert "jan@example.com" not in body["system"]
     assert "anna@example.de" not in body["messages"][0]["content"]

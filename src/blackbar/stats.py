@@ -20,7 +20,6 @@ CREATE TABLE IF NOT EXISTS requests (
     session TEXT,
     model TEXT,
     streaming INTEGER NOT NULL DEFAULT 0,
-    paused INTEGER NOT NULL DEFAULT 0,
     masked INTEGER NOT NULL DEFAULT 0,
     restored INTEGER NOT NULL DEFAULT 0,
     orphans INTEGER NOT NULL DEFAULT 0,
@@ -49,7 +48,6 @@ class RequestEvent:
     session: str | None = None
     model: str | None = None
     streaming: bool = False
-    paused: bool = False
     masked: int = 0
     restored: int = 0
     orphans: int = 0
@@ -62,6 +60,9 @@ class RequestEvent:
     # (kind, layer) -> count - stored so you can see which layer actually does the
     # work for which kind
     pairs: dict[tuple[str, str], int] = field(default_factory=dict)
+    # [(kind, vault key)] for this request - published to live watchers only, never
+    # written to the database
+    keys: list[tuple[str, str]] = field(default_factory=list)
     ts: float = field(default_factory=time.time)
     id: int | None = None
 
@@ -73,7 +74,6 @@ class RequestEvent:
             "session": self.session,
             "model": self.model,
             "streaming": self.streaming,
-            "paused": self.paused,
             "masked": self.masked,
             "restored": self.restored,
             "orphans": self.orphans,
@@ -82,6 +82,7 @@ class RequestEvent:
             "status": self.status,
             "kinds": self.kinds,
             "layers": self.layers,
+            "keys": [list(entry) for entry in self.keys],
             "cache_read": self.usage.get("cache_read_input_tokens"),
             "cache_write": self.usage.get("cache_creation_input_tokens"),
         }
@@ -100,12 +101,12 @@ class EventLog:
         usage = event.usage or {}
         cursor = self._conn.execute(
             """INSERT INTO requests
-               (ts, provider, session, model, streaming, paused, masked, restored, orphans,
+               (ts, provider, session, model, streaming, masked, restored, orphans,
                 detect_ms, total_ms, status, cache_read, cache_write, input_tokens, output_tokens)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 event.ts, event.provider, event.session, event.model,
-                int(event.streaming), int(event.paused), event.masked, event.restored, event.orphans,
+                int(event.streaming), event.masked, event.restored, event.orphans,
                 event.detect_ms, event.total_ms, event.status,
                 usage.get("cache_read_input_tokens"), usage.get("cache_creation_input_tokens"),
                 usage.get("input_tokens"), usage.get("output_tokens"),

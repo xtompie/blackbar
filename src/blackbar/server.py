@@ -37,7 +37,6 @@ class ProxyState:
         self.config = config
         self.vault = Vault()
         self.log = EventLog(config.db_path)
-        self.paused = False
         self.started_at = time.time()
         self.subscribers: set[asyncio.Queue] = set()
         self.request_count = 0
@@ -107,8 +106,6 @@ def _routes(state: ProxyState) -> list[Route]:
         Route("/_admin/stats", _admin_stats(state), methods=["GET"]),
         Route("/_admin/last", _admin_last(state), methods=["GET"]),
         Route("/_admin/watch", _admin_watch(state), methods=["GET"]),
-        Route("/_admin/pause", _admin_pause(state, True), methods=["POST"]),
-        Route("/_admin/resume", _admin_pause(state, False), methods=["POST"]),
         Route("/_admin/vault", _admin_vault(state), methods=["GET"]),
         Route("/_admin/vault/clear", _admin_vault_clear(state), methods=["POST"]),
         Route("/_admin/rules/reload", _admin_rules_reload(state), methods=["POST"]),
@@ -158,21 +155,18 @@ async def _handle_messages(state: ProxyState, request: Request) -> Response:
         provider=provider,
         model=str(body.get("model") or ""),
         streaming=bool(body.get("stream")),
-        paused=state.paused,
         session=session_key(body, request.headers.get("user-agent", "")),
     )
 
-    if state.paused:
-        payload = raw
-    else:
-        detect_started = time.perf_counter()
-        kinds, layers, masked = await redact_request(body, state.redactor)
-        event.detect_ms = (time.perf_counter() - detect_started) * 1000
-        event.kinds = dict(kinds)
-        event.layers = dict(layers)
-        event.pairs = _pairs(state, kinds, layers)
-        event.masked = masked
-        payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    detect_started = time.perf_counter()
+    kinds, layers, masked, keys = await redact_request(body, state.redactor)
+    event.detect_ms = (time.perf_counter() - detect_started) * 1000
+    event.kinds = dict(kinds)
+    event.layers = dict(layers)
+    event.pairs = _pairs(state, kinds, layers)
+    event.masked = masked
+    event.keys = keys
+    payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
 
     url = f"{upstream_base}{request.url.path[len('/' + provider):]}"
     if request.url.query:
@@ -199,14 +193,13 @@ async def _handle_messages(state: ProxyState, request: Request) -> Response:
         except json.JSONDecodeError:
             data = None
         if isinstance(data, dict):
-            if not state.paused:
-                if upstream.status_code >= 400:
-                    # API errors can quote a fragment of the prompt back - restore there too.
-                    data, restored, orphans = restore_all(data, state.vault)
-                else:
-                    restored, orphans = restore_response(data, state.vault)
-                event.restored = restored
-                event.orphans = orphans
+            if upstream.status_code >= 400:
+                # API errors can quote a fragment of the prompt back - restore there too.
+                data, restored, orphans = restore_all(data, state.vault)
+            else:
+                restored, orphans = restore_response(data, state.vault)
+            event.restored = restored
+            event.orphans = orphans
             event.usage = data.get("usage") or {}
             content = json.dumps(data, ensure_ascii=False).encode("utf-8")
 
@@ -244,7 +237,7 @@ async def _stream_response(
             data = json.loads(raw_body)
         except json.JSONDecodeError:
             data = None
-        if isinstance(data, dict) and not state.paused:
+        if isinstance(data, dict):
             data, restored, orphans = restore_all(data, state.vault)
             event.restored = restored
             event.orphans = orphans
@@ -258,16 +251,12 @@ async def _stream_response(
     async def body_stream():
         try:
             async for chunk in upstream.aiter_raw():
-                if state.paused:
-                    yield chunk
-                    continue
                 out = rewriter.feed(chunk)
                 if out:
                     yield out
-            if not state.paused:
-                tail = rewriter.close()
-                if tail:
-                    yield tail
+            tail = rewriter.close()
+            if tail:
+                yield tail
         finally:
             await upstream.aclose()
             event.restored = rewriter.stats.restored
@@ -337,7 +326,6 @@ def _admin_status(state: ProxyState):
         summary = state.log.summary(since=time.time() - 3600)
         return JSONResponse({
             "version": __version__,
-            "paused": state.paused,
             "uptime_s": round(time.time() - state.started_at, 1),
             "port": state.config.port,
             "requests": state.request_count,
@@ -386,13 +374,6 @@ def _admin_watch(state: ProxyState):
                 state.subscribers.discard(queue)
 
         return StreamingResponse(stream(), media_type="text/event-stream")
-    return handler
-
-
-def _admin_pause(state: ProxyState, paused: bool):
-    async def handler(request: Request) -> Response:
-        state.paused = paused
-        return JSONResponse({"paused": state.paused})
     return handler
 
 

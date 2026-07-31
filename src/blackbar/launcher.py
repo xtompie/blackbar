@@ -56,8 +56,7 @@ def launch(config: Config, provider: str, args: list[str], *, quiet: bool = Fals
     env["BLACKBAR_ACTIVE"] = "1"
 
     if not quiet:
-        status = "PAUSED (no redaction)" if _paused(config) else "active"
-        print(f"\033[90m▮ blackbar → {url} · {status}\033[0m", file=sys.stderr)
+        print(f"\033[90m▮ blackbar → {url}\033[0m", file=sys.stderr)
 
     try:
         os.execvpe(binary, [binary, *args], env)
@@ -80,9 +79,3 @@ def launch_direct(binary: str, args: list[str]) -> int:
         return 127
     return 0
 
-
-def _paused(config: Config) -> bool:
-    try:
-        return bool(daemon.admin_get(config, "status").get("paused"))
-    except Exception:
-        return False

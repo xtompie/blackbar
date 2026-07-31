@@ -96,8 +96,8 @@ def stop(force: bool = typer.Option(False, "--force", help="do not ask about act
             if attach_mod.is_attached(config):
                 print(f"{YELLOW}Warning:{OFF} attached mode - once stopped, no `claude` will start.")
             if sessions:
-                print(f"{YELLOW}Warning:{OFF} {len(sessions)} session(s) in the last hour. "
-                      f"To turn redaction off without dropping them use `blackbar pause`.")
+                print(f"{YELLOW}Warning:{OFF} {len(sessions)} session(s) in the last hour "
+                      f"will lose their connection.")
             if not typer.confirm("Stop anyway?", default=False):
                 raise typer.Exit(1)
         except typer.Exit:
@@ -119,24 +119,6 @@ def restart() -> None:
 
 
 @app.command()
-def pause() -> None:
-    """Pass traffic through WITHOUT redaction - sessions stay alive."""
-    config = _config()
-    _require_daemon(config)
-    daemon.admin_post(config, "pause")
-    print(f"{YELLOW}▮ PAUSED{OFF} - traffic reaches the API unredacted")
-
-
-@app.command()
-def resume() -> None:
-    """Resume redaction."""
-    config = _config()
-    _require_daemon(config)
-    daemon.admin_post(config, "resume")
-    print(f"{GREEN}▮{OFF} redaction active")
-
-
-@app.command()
 def status() -> None:
     """Daemon state and actual traffic."""
     config = _config()
@@ -146,8 +128,7 @@ def status() -> None:
     data = daemon.admin_get(config, "status")
     mode_name, mode_detail = _mode(config)
 
-    state = f"{YELLOW}PAUSED{OFF}" if data["paused"] else f"{GREEN}active{OFF}"
-    print(f"{BOLD}blackbar {data['version']}{OFF}  {state}  {config.base_url}")
+    print(f"{BOLD}blackbar {data['version']}{OFF}  {GREEN}active{OFF}  {config.base_url}")
     print(f"  mode        {mode_name} {DIM}{mode_detail}{OFF}")
     print(f"  uptime      {_duration(data['uptime_s'])}")
     print(f"  layers      {', '.join(data['layers'])}")
@@ -189,23 +170,45 @@ def mode() -> None:
 # --- observation --------------------------------------------------------------
 
 @app.command()
-def watch() -> None:
-    """Live view of the traffic."""
+def watch(
+    reveal: bool = typer.Option(False, "--reveal", help="⚠ also print the replaced values"),
+) -> None:
+    """Live view of the traffic, one line per request."""
     import httpx
 
     config = _config()
     _require_daemon(config)
+    if reveal:
+        print(f"{YELLOW}⚠ --reveal prints real data to the screen.{OFF}")
     print(f"{DIM}watching {config.base_url} - Ctrl+C to stop{OFF}")
+    values: dict[str, str] = {}
     try:
         with httpx.stream("GET", f"{config.base_url}/_admin/watch", timeout=None) as response:
             for line in response.iter_lines():
                 if not line.startswith("data:"):
                     continue
-                print(_format_event(json.loads(line[5:].strip())))
+                event = json.loads(line[5:].strip())
+                # flush: watch is meant to be piped into grep/tee as well
+                print(_format_event(event), flush=True)
+                if reveal and event.get("keys"):
+                    _print_values(config, event["keys"], values)
     except KeyboardInterrupt:
         pass
     except Exception as exc:
         _die(str(exc))
+
+
+def _print_values(config, keys: list, cache: dict[str, str]) -> None:
+    """Resolves vault keys from the event into the values they replaced."""
+    import httpx
+
+    if any(key not in cache for _, key in keys):
+        response = httpx.get(f"{config.base_url}/_admin/vault", params={"reveal": "1"}, timeout=10)
+        cache.clear()
+        cache.update({entry["key"]: entry["value"] for entry in response.json()["entries"]})
+    for kind, key in keys:
+        value = cache.get(key, "?")
+        print(f"    {DIM}{kind:<12}{OFF} {value} {DIM}→ {{{{sensitive:{kind}:{key}}}}}{OFF}", flush=True)
 
 
 @app.command()
@@ -216,8 +219,6 @@ def last(n: int = typer.Option(5, "-n", help="how many recent requests")) -> Non
     for entry in reversed(daemon.admin_get(config, "last", n=n)["requests"]):
         stamp = time.strftime("%H:%M:%S", time.localtime(entry["ts"]))
         flags = []
-        if entry["paused"]:
-            flags.append(f"{YELLOW}paused{OFF}")
         if entry["orphans"]:
             flags.append(f"{RED}orphans:{entry['orphans']}{OFF}")
         print(
@@ -631,9 +632,6 @@ def doctor() -> None:
         check("model", data["model_loaded"], data.get("model_error") or data["model"],
               warn=not data["model_loaded"] and not data.get("model_error"))
         check("rules loaded", not data.get("rules_error"), data.get("rules_error") or f"{data['rules_count']}")
-        if data["paused"]:
-            check("redaction", False, "PAUSED - traffic goes out unredacted", warn=True)
-
     import httpx
 
     for name, provider in config.providers.items():
@@ -718,8 +716,6 @@ def _format_event(event: dict) -> str:
     kinds = _kinds(event.get("kinds") or {})
     orphans = event.get("orphans") or 0
     tail = f" {RED}orphans:{orphans}{OFF}" if orphans else ""
-    if event.get("paused"):
-        tail += f" {YELLOW}paused{OFF}"
     return (
         f"{stamp} {event['provider']} {DIM}#{event['id']}{OFF} "
         f"{kinds or DIM + 'none' + OFF} "
