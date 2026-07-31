@@ -1,0 +1,161 @@
+"""Redaction inside the Anthropic Messages API contract.
+
+Only the parts that carry user data are scanned: `system`, message content and tool
+results. Tool definitions (`tools[].description`) are left alone - they describe an
+interface, not data, and rewriting them would break the model's understanding of its
+own tools.
+
+Unknown fields pass through untouched, which is why this does not have to keep up with
+every API change.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from collections import Counter
+
+from .detect import Redactor
+from .vault import Vault
+
+
+async def redact_request(body: dict, redactor: Redactor) -> tuple[Counter[str], Counter[str], int]:
+    """Redacts the body in place. Returns (kinds, layers, number of replacements)."""
+    kinds: Counter[str] = Counter()
+    layers: Counter[str] = Counter()
+
+    async def scan(text: str) -> str:
+        masked, hit_kinds, hit_layers = await redactor.redact(text)
+        kinds.update(hit_kinds)
+        layers.update(hit_layers)
+        return masked
+
+    system = body.get("system")
+    if isinstance(system, str):
+        body["system"] = await scan(system)
+    elif isinstance(system, list):
+        for block in system:
+            if isinstance(block, dict) and isinstance(block.get("text"), str):
+                block["text"] = await scan(block["text"])
+
+    for message in body.get("messages") or []:
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            message["content"] = await scan(content)
+        elif isinstance(content, list):
+            for block in content:
+                await _scan_block(block, scan)
+
+    return kinds, layers, sum(kinds.values())
+
+
+async def _scan_block(block: dict, scan) -> None:
+    if not isinstance(block, dict):
+        return
+    block_type = block.get("type")
+
+    if block_type == "text" and isinstance(block.get("text"), str):
+        block["text"] = await scan(block["text"])
+
+    elif block_type == "tool_result":
+        # The main leak source: tool output, i.e. file contents and command results.
+        content = block.get("content")
+        if isinstance(content, str):
+            block["content"] = await scan(content)
+        elif isinstance(content, list):
+            for inner in content:
+                await _scan_block(inner, scan)
+
+    elif block_type == "tool_use":
+        # Arguments the model passed to a tool in an earlier turn - they come back as
+        # history, so they have to be masked like everything else.
+        block["input"] = await _scan_json(block.get("input"), scan)
+
+    elif block_type == "thinking" and isinstance(block.get("thinking"), str):
+        # Thinking blocks are signed by the API; rewriting them breaks the signature.
+        return
+
+
+async def _scan_json(value, scan):
+    if isinstance(value, str):
+        return await scan(value)
+    if isinstance(value, list):
+        return [await _scan_json(item, scan) for item in value]
+    if isinstance(value, dict):
+        return {key: await _scan_json(item, scan) for key, item in value.items()}
+    return value
+
+
+def restore_response(body: dict, vault: Vault) -> tuple[int, int]:
+    """Restores originals in a non-streaming response. Returns (restored, orphans)."""
+    restored = 0
+    orphans = 0
+
+    def restore(text: str) -> str:
+        nonlocal restored, orphans
+        out, count, missing = vault.restore(text)
+        restored += count
+        orphans += missing
+        return out
+
+    def walk(value):
+        if isinstance(value, str):
+            return restore(value)
+        if isinstance(value, list):
+            return [walk(item) for item in value]
+        if isinstance(value, dict):
+            return {key: walk(item) for key, item in value.items()}
+        return value
+
+    for block in body.get("content") or []:
+        if not isinstance(block, dict):
+            continue
+        if isinstance(block.get("text"), str):
+            block["text"] = restore(block["text"])
+        if block.get("type") == "tool_use" and "input" in block:
+            block["input"] = walk(block["input"])
+
+    return restored, orphans
+
+
+def restore_all(value, vault: Vault) -> tuple[object, int, int]:
+    """Restores originals in every string of a structure.
+
+    Used for responses that are not a plain `content` array - above all API errors,
+    where a placeholder can come back inside the error message.
+    """
+    restored = 0
+    orphans = 0
+
+    def walk(node):
+        nonlocal restored, orphans
+        if isinstance(node, str):
+            out, count, missing = vault.restore(node)
+            restored += count
+            orphans += missing
+            return out
+        if isinstance(node, list):
+            return [walk(item) for item in node]
+        if isinstance(node, dict):
+            return {key: walk(item) for key, item in node.items()}
+        return node
+
+    return walk(value), restored, orphans
+
+
+def session_key(body: dict, user_agent: str = "") -> str:
+    """Stable session id for the "traffic per window" metric.
+
+    Claude Code's system prompt contains the working directory among other things and
+    stays constant within a session, which makes it a usable fingerprint. Only the hash
+    is ever stored.
+    """
+    system = body.get("system")
+    if isinstance(system, list):
+        seed = "".join(
+            block.get("text", "") for block in system if isinstance(block, dict)
+        )[:400]
+    else:
+        seed = str(system or "")[:400]
+    return hashlib.blake2b((user_agent + seed).encode("utf-8"), digest_size=3).hexdigest()

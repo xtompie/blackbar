@@ -1,0 +1,40 @@
+[project]
+name = "blackbar"
+version = "0.1.0"
+description = "Lokalne proxy redakcji danych poufnych dla Claude Code"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    "starlette>=0.37",
+    "uvicorn>=0.30",
+    "httpx>=0.27",
+    "typer>=0.12",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# Warstwa GLiNER. Ciagnie torch (~2 GB) - bez niej proxy dziala na regulach i regexach.
+detect = [
+    "gliner>=0.2.13",
+    "huggingface_hub>=0.23",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+blackbar = "blackbar.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/blackbar"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
