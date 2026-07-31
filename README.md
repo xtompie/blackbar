@@ -15,17 +15,19 @@ Claude Code ──► blackbar (127.0.0.1:8555) ──► api.anthropic.com
 Paste this into Claude Code, in any directory:
 
 ```
-Install blackbar for me: https://github.com/xtompie/blackbar
-Clone the repo, read INSTALL.md and follow the installation step by step.
+Install blackbar for me.
+
+Clone https://github.com/xtompie/blackbar into ~/.local/share/blackbar/src
+(create the directory if needed), then read INSTALL.md in that repo and follow
+it step by step. It tells you which Python version to use, what must not be
+changed, and how to verify each step. Do not skip the verification steps.
+Ask me the daemon management question in step 7 before changing anything
+outside ~/.config/blackbar.
 ```
 
-Claude picks the package manager, the Python version and the model variant that fit
-your machine, downloads the model with visible progress, and finishes by showing you a
-working redaction. It will also ask how you want the daemon managed - see *Modes*.
-
-Installation deliberately does not go through PyPI: an instruction written for an agent
-survives ecosystem churn better than a frozen `pip install`, and you have Claude at hand
-anyway.
+There is no package to install: [INSTALL.md](INSTALL.md) is a step-by-step instruction
+written for Claude, which figures out the rest and shows you a working redaction at the
+end.
 
 ## Quick start
 
@@ -43,12 +45,21 @@ blackbar test "Jan Kowalski, jan@example.com"
 | **service** | same, but the daemon runs under launchd/systemd - survives reboots and crashes | a service file |
 | **attached** | every `claude` goes through the proxy, nothing to remember | also `~/.claude/settings.json` |
 
-**Attached mode requires service mode.** Without the launcher nobody checks whether the
-daemon is alive, so a dead daemon means `claude` will not start at all. That is
-intentional: the alternative would be silently sending data out unredacted.
+The two halves are independent, so you can mix them however you like:
 
-Switching: `blackbar service install`, `blackbar attach`, `blackbar detach`,
-`blackbar mode`.
+```bash
+blackbar service install     # daemon under launchd/systemd
+blackbar service uninstall   # back to lazy start
+blackbar attach              # wire ANTHROPIC_BASE_URL into ~/.claude/settings.json
+blackbar detach              # unwire it, leave the service running
+blackbar mode                # what is active right now and what holds it
+```
+
+`attach` asks for a service first, because without the launcher nobody checks whether
+the daemon is alive - a dead daemon then means `claude` will not start at all. If you
+want it anyway, `blackbar attach --force` does it and says what you are taking on.
+`detach` never touches the service, and `service uninstall` never touches the settings
+entry.
 
 ## Turning it off
 

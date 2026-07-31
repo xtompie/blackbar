@@ -26,6 +26,21 @@ that are already running. Leave them alone even when something else looks cleane
 - the model variant (see step 4) - match it to available RAM and the languages the user works in
 - workarounds for system-specific problems, as long as the step's verification passes
 
+## Step 0 — get the repository
+
+If you are not already inside a clone of it:
+
+```bash
+git clone https://github.com/xtompie/blackbar ~/.local/share/blackbar/src
+cd ~/.local/share/blackbar/src
+```
+
+That location is only a suggestion - anywhere the user prefers is fine. Keep the clone
+around after installing: updates and `blackbar uninstall` are easier with it. Whatever
+you pick goes into the report in step 8.
+
+**Verify:** `INSTALL.md` and `pyproject.toml` are in the current directory.
+
 ## Step 1 — Python
 
 You need Python **3.11+**, but **not the newest one**: the GLiNER layer pulls in
@@ -145,6 +160,11 @@ Carrying it out:
 - **1** — do nothing, that is the state after step 5.
 - **2** — `blackbar service install`
 - **3** — `blackbar service install`, then `blackbar attach`
+
+The two halves stay independent afterwards: `blackbar detach` leaves the service
+running, `blackbar service uninstall` leaves the settings entry alone, and
+`blackbar attach --force` wires things up with no service at all. The user can rearrange
+this later without reinstalling anything.
 
 For option 3, say this before doing it: from that point on, a dead daemon means `claude`
 will not start at all (by design - the alternative is silently sending data out

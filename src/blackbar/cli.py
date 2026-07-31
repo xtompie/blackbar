@@ -524,12 +524,18 @@ def service_status() -> None:
 
 
 @app.command()
-def attach(yes: bool = typer.Option(False, "--yes", "-y")) -> None:
+def attach(
+    yes: bool = typer.Option(False, "--yes", "-y"),
+    force: bool = typer.Option(False, "--force", help="attach without a system service"),
+) -> None:
     """Hook the proxy up for good: every `claude` goes through blackbar."""
     config = _config()
     if not service.installed():
-        _die("run `blackbar service install` first - without the service a dead daemon "
-             "means claude does not start at all")
+        if not force:
+            _die("run `blackbar service install` first - without the service a dead daemon "
+                 "means claude does not start at all. Use --force to attach anyway.")
+        print(f"{YELLOW}⚠ No system service: whenever the daemon is down, claude will not "
+              f"start at all. You keep the pieces.{OFF}")
     if attach_mod.is_attached(config):
         print(f"{DIM}already attached: {attach_mod.current()}{OFF}")
         return
