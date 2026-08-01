@@ -103,3 +103,11 @@ async def test_a_value_seen_once_is_masked_everywhere_after(tmp_path):
     masked, kinds, layers, _ = await redactor.redact("cc Jan Kowalski on the reply")
     assert "Jan Kowalski" not in masked
     assert layers["vault"] == 1
+
+
+def test_password_hashes_are_secrets_but_git_hashes_are_not():
+    assert "password_hash" in kinds("stored: $2b$12$K8Hc1Zq3Xk9lYw0pQeR5tOa7bC4dEfGh")
+    assert "password_hash" in kinds("hash = $argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQ$abcd")
+    # a commit sha and a lockfile checksum must survive untouched
+    assert kinds("fix in 9bf1add4c3e2f1a0b7d6c5e4f3a2b1c0d9e8f7a6") == set()
+    assert kinds('"integrity": "sha512-abc123def456ghi789jkl012mno345pqr678stu"') == set()

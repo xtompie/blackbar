@@ -13,6 +13,10 @@ from .base import Span
 
 _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("private_key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----")),
+    # Password hashes: a secret by definition. Bare SHA/MD5 digests are deliberately not
+    # here - those are git commits and lockfile checksums, and masking them would break
+    # ordinary work with code.
+    ("password_hash", re.compile(r"\$(?:2[aby]|argon2(?:id|i|d)|scrypt|6|5|1)\$[^\s\"']{10,}")),
     ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")),
     ("anthropic_key", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}")),
     ("openai_key", re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}")),
