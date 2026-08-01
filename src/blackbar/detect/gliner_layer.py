@@ -9,6 +9,7 @@ blocks the event loop and stalls streaming for every other session.
 
 from __future__ import annotations
 
+import re
 import threading
 
 from .base import Span
@@ -30,6 +31,21 @@ CHUNK_OVERLAP = 200
 # Entities shorter than this are almost always false positives (initials, code
 # abbreviations).
 MIN_ENTITY_CHARS = 3
+
+# Words the model reads as a person because a prompt talks *about* people. Claude Code's
+# system prompt alone says "user" dozens of times; masking those would rewrite the
+# instructions and fill the vault with noise.
+GENERIC = {
+    "user", "users", "you", "your", "yours", "claude", "assistant", "agent", "human",
+    "reader", "author", "owner", "admin", "administrator", "root", "system", "model",
+    "team", "developer", "developers", "customer", "client", "someone", "anyone",
+    "everyone", "people", "person", "name", "email", "address", "company",
+    "organization", "anthropic", "openai", "github", "google", "microsoft", "apple",
+    "code", "tool", "tools", "file", "files", "project", "repo", "repository",
+}
+
+# Punctuation that says "identifier", not "name": header-names, snake_case, paths, tags.
+CODE_LIKE = ("_", "/", "\\", "{", "}", "<", ">", "$", "=", "(", ")", "[", "]")
 
 
 class GlinerDetector:
@@ -78,13 +94,43 @@ class GlinerDetector:
                 return spans
             for entity in found:
                 entity_text = entity.get("text", "")
-                if len(entity_text.strip()) < MIN_ENTITY_CHARS:
-                    continue
                 kind = self.labels.get(entity.get("label", ""), "entity")
+                if not _plausible(kind, entity_text):
+                    continue
                 start = offset + int(entity["start"])
                 end = offset + int(entity["end"])
                 spans.append(Span(start, end, kind, text[start:end], self.layer))
         return spans
+
+
+def _plausible(kind: str, text: str) -> bool:
+    """Rejects what the model calls an entity but a human would not."""
+    value = text.strip()
+    if len(value) < MIN_ENTITY_CHARS:
+        return False
+    if any(mark in value for mark in CODE_LIKE):
+        return False
+
+    words = [word for word in re.split(r"[\s,.]+", value) if word]
+    if not words:
+        return False
+    # "user", "You", "Claude agent" - every word is a role, not a name.
+    if all(word.lower().strip("'\"") in GENERIC for word in words):
+        return False
+
+    if kind in ("person", "company"):
+        # Proper nouns start with a capital in every language this model covers.
+        if not value[:1].isupper():
+            return False
+    if kind == "address":
+        # Streets start with "ul." or a number as often as with a capital.
+        if not (value[:1].isupper() or any(c.isdigit() for c in value)):
+            return False
+    if kind == "email" and "@" not in value:
+        return False
+    if kind == "phone" and sum(character.isdigit() for character in value) < 6:
+        return False
+    return True
 
 
 def _chunks(text: str) -> list[tuple[int, str]]:

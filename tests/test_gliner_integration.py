@@ -98,3 +98,22 @@ async def test_all_layers_together(tmp_path, detector):
     restored, count, orphans = vault.restore(masked)
     assert restored == original
     assert orphans == 0
+
+
+def test_role_words_are_not_people(detector):
+    """Claude Code's system prompt says "user" dozens of times; masking those would
+    rewrite the instructions and fill the vault with noise."""
+    text = ("You are Claude Code. Help the user with their task. Ask the user before "
+            "deleting files. The user may be a developer or an admin.")
+    assert found(detector, text) == {}
+
+
+def test_a_real_name_next_to_role_words_still_gets_caught(detector):
+    hits = found(detector, "You are Claude Code, working for the user Tomasz Pielczyk.")
+    assert hits["person"] == ["Tomasz Pielczyk"]
+
+
+def test_identifiers_are_not_companies(detector):
+    """Header names and snake_case look like organisations to the model."""
+    text = "Send x-anthropic-billing-header and read config_file_path from the env."
+    assert "company" not in found(detector, text)
