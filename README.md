@@ -6,9 +6,6 @@ request leaves your machine, and puts the real values back in the reply.
 Regexes catch emails, keys and IDs. A local LLM catches names, companies and addresses.
 Nothing is sent anywhere to be classified.
 
-Starting the daemon takes about fifteen seconds - that is the model loading, once. After
-that a typical request costs a few hundred milliseconds, and repeats cost nothing.
-
 ![A request going through blackbar: the name is replaced on the way out and put back in the reply](demo/blackbar-demo.gif)
 
 ## Install
@@ -142,19 +139,10 @@ proxy.
 ~/.local/state/blackbar/        requests.log, daemon.log
 ```
 
-## Speed
-
-Scanning costs about 285 ms per 1000 characters, so a large `tool_result` is slow: a
-100 KB file takes half a minute the first time it appears. Repeats are free - the result
-is cached per block - but `--resume` and anything that restarts the daemon start from an
-empty cache and pay for the whole history at once.
-
-This is deliberate. Everything is scanned, with no shortcuts for text that "looks like
-code", because a shortcut is a hole with a nicer name. Blackbar being slow, or failing
-outright, is a far better outcome than a name going out unmasked.
-
 ## Limitations
 
+- Starting the daemon takes ~15 s (loading the model) and large files are slow to scan:
+  100 KB costs about half a minute, once.
 - The model cannot reason about values it never saw.
 - It can also mangle a placeholder — asking it to translate the text does it reliably.
   The value stayed home, but the reply comes back with `{{sensitive:...}}` in it. Counted
