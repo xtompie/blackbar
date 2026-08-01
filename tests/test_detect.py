@@ -142,3 +142,22 @@ def test_tax_id_needs_the_word_next_to_it():
     the NIP checksum."""
     assert kinds("MAX_SAFE = 2147483646") == set()
     assert "nip" in kinds("NIP: 6472477787")
+
+
+async def test_parallel_requests_scan_the_same_text_once(tmp_path):
+    """Claude Code sends several requests at once, all carrying the same system prompt.
+    Without in-flight deduplication each one scans it from scratch, because the cache
+    only fills when a scan finishes."""
+    import asyncio
+
+    calls = 0
+
+    class CountingRules(RulesDetector):
+        def detect(self, text):
+            nonlocal calls
+            calls += 1
+            return []
+
+    redactor = Redactor(Vault(), CountingRules(tmp_path / "missing.yaml"))
+    await asyncio.gather(*[redactor.redact("write to jan@example.com") for _ in range(5)])
+    assert calls == 1

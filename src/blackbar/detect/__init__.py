@@ -37,6 +37,9 @@ class Redactor:
         self.regex = regex if regex is not None else RegexDetector()
         self.gliner = gliner
         self._cache: OrderedDict[str, tuple[str, tuple[tuple[str, str], ...]]] = OrderedDict()
+        # Requests arrive in parallel carrying the same system prompt. Without this they
+        # would each scan it from scratch, because the cache only fills once a scan ends.
+        self._in_flight: dict[str, asyncio.Task] = {}
 
     def detect_sync(self, text: str) -> list[Span]:
         spans = self._cheap_spans(text)
@@ -64,7 +67,26 @@ class Redactor:
 
         cache_key = hashlib.blake2b(text.encode("utf-8"), digest_size=16).hexdigest()
         cached = self._cache.get(cache_key)
-        if cached is None:
+        if cached is not None:
+            self._cache.move_to_end(cache_key)
+            masked, hits = cached
+        else:
+            task = self._in_flight.get(cache_key)
+            if task is None:
+                task = asyncio.create_task(self._scan(cache_key, text))
+                self._in_flight[cache_key] = task
+            masked, hits = await asyncio.shield(task)
+
+        return (
+            masked,
+            Counter(kind for kind, _, _ in hits),
+            Counter(layer for _, layer, _ in hits),
+            [(kind, key) for kind, _, key in hits],
+        )
+
+
+    async def _scan(self, cache_key: str, text: str) -> tuple[str, tuple]:
+        try:
             if self.gliner is not None and self.gliner.loaded:
                 # GLiNER is CPU-bound: it must not run on the event loop.
                 spans = await asyncio.get_running_loop().run_in_executor(None, self.detect_sync, text)
@@ -79,16 +101,9 @@ class Redactor:
             self._cache[cache_key] = (masked, hits)
             if len(self._cache) > CACHE_SIZE:
                 self._cache.popitem(last=False)
-        else:
-            self._cache.move_to_end(cache_key)
-            masked, hits = cached
-
-        return (
-            masked,
-            Counter(kind for kind, _, _ in hits),
-            Counter(layer for _, layer, _ in hits),
-            [(kind, key) for kind, _, key in hits],
-        )
+            return masked, hits
+        finally:
+            self._in_flight.pop(cache_key, None)
 
 
 def _key_of(placeholder: str) -> str:
