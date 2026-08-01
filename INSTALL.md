@@ -182,10 +182,11 @@ Everything else works as usual. Nothing leaves your machine unmasked - names,
 emails and keys are replaced before the request goes out, and put back in the reply.
 
 Optional:
-  blackbar watch      in a second window: see what is being replaced, live
-  blackbar attach     make every `claude` go through it, not just this command
-  blackbar help       all commands
-  blackbar doctor     when something looks wrong
+  blackbar watch            in a second window: see what is being replaced, live
+  blackbar service install  keep the daemon alive across reboots and crashes
+  blackbar attach           make every `claude` go through it, not just this command
+  blackbar help             all commands
+  blackbar doctor           when something looks wrong
 ```
 
 Then stop. Do not add a summary of what you did.

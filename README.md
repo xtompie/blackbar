@@ -82,6 +82,10 @@ would then check whether the daemon is alive, `attach` requires `blackbar servic
 first; a dead daemon means `claude` will not start at all. Use `blackbar direct` to bypass
 it once, `blackbar detach` to go back.
 
+In both cases the daemon starts on demand and dies with your machine. `blackbar service
+install` puts it under launchd (macOS) or systemd (Linux) instead, so it comes back after
+a reboot or a crash. `blackbar service uninstall` reverts that.
+
 There is no pause switch. An "off" you can forget about is worse than no protection.
 
 ## How it works
