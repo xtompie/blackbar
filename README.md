@@ -50,6 +50,7 @@ blackbar last -n 5           # the last few requests
 blackbar stats --today       # totals per kind and layer
 blackbar logs                # the daemon's own log
 
+blackbar file notes.md notes.anon.md            # redact a file for use anywhere else
 blackbar test "Jan Kowalski, jan@example.com"   # what would be replaced, and by which layer
 blackbar rules add "Acme Ltd" --kind company    # add a pattern of your own
 blackbar rules list|edit|reload

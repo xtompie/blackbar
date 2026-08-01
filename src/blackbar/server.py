@@ -110,6 +110,7 @@ def _routes(state: ProxyState) -> list[Route]:
         Route("/_admin/vault/clear", _admin_vault_clear(state), methods=["POST"]),
         Route("/_admin/rules/reload", _admin_rules_reload(state), methods=["POST"]),
         Route("/_admin/test", _admin_test(state), methods=["POST"]),
+        Route("/_admin/mask", _admin_mask(state), methods=["POST"]),
         Route("/_admin/allow/reload", _admin_allow_reload(state), methods=["POST"]),
         Route("/v1/messages", messages, methods=["POST"]),
         Route("/v1/messages/count_tokens", messages, methods=["POST"]),
@@ -439,6 +440,22 @@ def _admin_allow_reload(state: ProxyState):
 
         state.config.allow = load(state.config.path).allow
         return JSONResponse({"allow": state.config.allow})
+    return handler
+
+
+def _admin_mask(state: ProxyState):
+    """Redacts a piece of text the same way a request is redacted, keeping the mapping
+    in the vault so it can be reversed later."""
+    async def handler(request: Request) -> Response:
+        payload = await request.json()
+        text = str(payload.get("text") or "")
+        masked, kinds, layers, keys = await state.redactor.redact(text)
+        return JSONResponse({
+            "text": masked,
+            "kinds": dict(kinds),
+            "layers": dict(layers),
+            "replaced": sum(kinds.values()),
+        })
     return handler
 
 

@@ -385,6 +385,74 @@ def _test_local(config, text: str) -> dict:
     }
 
 
+@app.command()
+def file(
+    source: Path = typer.Argument(..., help="file to read"),
+    target: Path = typer.Argument(None, help="file to write (default: stdout)"),
+) -> None:
+    """Replace confidential values in a file with placeholders.
+
+    For text going somewhere other than Claude Code - paste the result anywhere. The
+    placeholder keeps an id, so the model can still tell one person from another and
+    answer about "{{sensitive:person:a1b2c3}}"; you know who that is.
+
+    Works without the daemon; it just has to load the model first.
+    """
+    config = _config()
+    if not source.exists():
+        _die(f"no such file: {source}")
+    text = source.read_text(encoding="utf-8")
+
+    masked = kinds = None
+    if daemon.is_running(config):
+        import httpx
+
+        try:
+            response = httpx.post(f"{config.base_url}/_admin/mask", json={"text": text}, timeout=1800)
+            response.raise_for_status()
+            data = response.json()
+            masked, kinds = data["text"], data["kinds"]
+        except httpx.HTTPError:
+            # An older daemon has no such endpoint; do it here instead.
+            masked = None
+    if masked is None:
+        print(f"{DIM}loading the detection model - about 15 seconds{OFF}", file=sys.stderr, flush=True)
+        masked, kinds = _mask_locally(config, text)
+
+    if target:
+        target.write_text(masked, encoding="utf-8")
+    else:
+        print(masked, end="")
+    print(f"{DIM}{sum(kinds.values())} value(s) replaced ({_kinds(kinds) or 'none'}){OFF}",
+          file=sys.stderr)
+
+
+def _mask_locally(config, text: str) -> tuple[str, dict]:
+    """Same layers as the proxy, without needing it to run."""
+    import collections
+    import os
+
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+    os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+    import warnings
+
+    warnings.filterwarnings("ignore")
+
+    from .detect import Redactor
+    from .detect.base import apply_spans
+    from .detect.gliner_layer import GlinerDetector
+    from .detect.regexes import RegexDetector
+    from .detect.rules import RulesDetector
+    from .vault import Vault
+
+    vault = Vault()
+    gliner = GlinerDetector(config.model, config.threshold) if "gliner" in config.layers else None
+    redactor = Redactor(vault, RulesDetector(config.rules_path), RegexDetector(), gliner)
+    spans = redactor.detect_sync(text)
+    masked = apply_spans(text, spans, lambda s: vault.mask(s.kind, s.text))
+    return masked, dict(collections.Counter(span.kind for span in spans))
+
+
 rules_app = typer.Typer(help="Custom rules (rules.yaml).", no_args_is_help=True)
 app.add_typer(rules_app, name="rules")
 
