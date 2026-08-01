@@ -35,9 +35,10 @@ git clone https://github.com/xtompie/blackbar ~/.local/share/blackbar/src
 cd ~/.local/share/blackbar/src
 ```
 
-That location is only a suggestion - anywhere the user prefers is fine. Keep the clone
-around after installing: updates and `blackbar uninstall` are easier with it. Whatever
-you pick goes into the report in step 8.
+That location is only a suggestion - anywhere the user prefers is fine, but the clone has
+to stay: `blackbar update` pulls it and reinstalls from it. Record the exact path in the
+report in step 8, on a line containing the word `repo` - that is where update looks
+for it.
 
 **Verify:** `INSTALL.md` and `pyproject.toml` are in the current directory.
 

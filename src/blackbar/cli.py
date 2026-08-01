@@ -58,10 +58,11 @@ def claude(ctx: typer.Context) -> None:
 
 @app.command(context_settings=PASSTHROUGH)
 def direct(ctx: typer.Context) -> None:
-    """Run a client with the proxy bypassed: blackbar direct claude [args]"""
-    if not ctx.args:
-        _die("name the program, e.g. `blackbar direct claude`")
-    raise typer.Exit(launcher.launch_direct(ctx.args[0], ctx.args[1:]))
+    """Run claude with the proxy bypassed - nothing is redacted."""
+    args = ctx.args
+    binary = args[0] if args and not args[0].startswith("-") else launcher.BINARY
+    rest = args[1:] if binary is not launcher.BINARY else args
+    raise typer.Exit(launcher.launch_direct(binary, rest))
 
 
 # --- lifecycle ----------------------------------------------------------------
@@ -765,6 +766,77 @@ def help_command(ctx: typer.Context) -> None:
 def version() -> None:
     """Version."""
     print(f"blackbar {__version__}")
+
+
+@app.command()
+def update(yes: bool = typer.Option(False, "--yes", "-y")) -> None:
+    """Pull the repository and reinstall, so the command matches the code."""
+    config = _config()
+    repo = _find_repo(config)
+    if repo is None:
+        _die("cannot find the clone this was installed from - pull it by hand, then "
+             "reinstall (see INSTALL.md step 2)")
+    print(f"{DIM}repository: {repo}{OFF}")
+
+    before = _git(repo, "rev-parse", "--short", "HEAD")
+    pull = subprocess.run(["git", "-C", str(repo), "pull", "--ff-only"],
+                          capture_output=True, text=True)
+    if pull.returncode != 0:
+        _die(pull.stderr.strip() or "git pull failed")
+    after = _git(repo, "rev-parse", "--short", "HEAD")
+
+    if before == after:
+        print("already up to date")
+        return
+    changes = _git(repo, "log", "--oneline", f"{before}..{after}")
+    print(changes or f"{before} → {after}")
+
+    if not yes and not typer.confirm("Reinstall from this?", default=True):
+        raise typer.Exit(1)
+
+    editable = _is_editable()
+    if editable:
+        print(f"{DIM}editable install - the code is already live{OFF}")
+    else:
+        command = ["uv", "tool", "install", "--force", "."] if _has_uv() else [
+            sys.executable, "-m", "pip", "install", "--quiet", "."]
+        result = subprocess.run(command, cwd=str(repo), capture_output=True, text=True)
+        if result.returncode != 0:
+            _die(result.stderr.strip() or "reinstall failed")
+        print(f"{GREEN}▮{OFF} reinstalled")
+
+    if daemon.is_running(config):
+        print(f"{DIM}restarting the daemon so it runs the new code{OFF}")
+        daemon.stop(config)
+        daemon.start_background(config)
+        print(f"{GREEN}▮{OFF} daemon restarted, vault empty")
+
+
+def _find_repo(config) -> Path | None:
+    """The clone we were installed from: recorded at install time, or right here."""
+    report = config.install_report_path
+    if report.exists():
+        for line in report.read_text(encoding="utf-8").splitlines():
+            if "repo" in line.lower() or "clone" in line.lower():
+                for word in line.replace("`", " ").split():
+                    candidate = Path(word.strip("*-: ")).expanduser()
+                    if (candidate / ".git").exists():
+                        return candidate
+    here = Path(__file__).resolve().parents[2]
+    return here if (here / ".git").exists() else None
+
+
+def _git(repo: Path, *args: str) -> str:
+    result = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+    return result.stdout.strip()
+
+
+def _is_editable() -> bool:
+    return (Path(__file__).resolve().parents[2] / "pyproject.toml").exists()
+
+
+def _has_uv() -> bool:
+    return subprocess.run(["which", "uv"], capture_output=True).returncode == 0
 
 
 @app.command()

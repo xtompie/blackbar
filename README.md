@@ -49,7 +49,7 @@ There is no pause switch, on purpose: a global "off" that you can forget about i
 than no protection at all. Instead you decide per run.
 
 ```bash
-blackbar direct claude     # this one run bypasses the proxy
+blackbar direct            # this one run bypasses the proxy (same as `blackbar direct claude`)
 blackbar detach            # stop routing every `claude` through it (attached mode only)
 ```
 
@@ -135,6 +135,20 @@ leak to a different vendor.
 blackbar test "Jan Kowalski, jan@example.com"   # see what would be replaced
 blackbar rules add "Acme Ltd" --kind company    # add your own
 ```
+
+## Updating
+
+```bash
+blackbar update
+```
+
+Pulls the clone it was installed from, shows what changed, reinstalls and restarts the
+daemon. `git pull` alone is not enough unless the install was editable: `uv tool install`
+copies the package, so the repository would move on while the command stayed behind.
+
+The clone has to still be there. `blackbar update` finds it from
+`~/.config/blackbar/install-report.md`, or from its own location when it runs from the
+repository; if the directory is gone it says so instead of pretending.
 
 ## Modes
 
