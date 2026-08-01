@@ -32,6 +32,9 @@ MAX_BYTES = 5 * 1024 * 1024
 @dataclass
 class RequestEvent:
     session: str | None = None
+    # the endpoint that was called - without it a refusal says nothing about what was
+    # refused
+    path: str = "-"
     model: str | None = None
     streaming: bool = False
     chars: int = 0
@@ -59,6 +62,7 @@ class RequestEvent:
             ("id", self.id),
             ("phase", "sent"),
             ("session", self.session or "-"),
+            ("path", self.path or "-"),
             ("model", self.model or "-"),
             ("stream", int(self.streaming)),
             # chars is what detect_ms was spent on - without it a slow request looks
@@ -108,6 +112,7 @@ def parse_line(line: str) -> dict | None:
         "id": _int(fields.get("id")),
         "phase": fields.get("phase", "sent"),
         "session": fields.get("session", "-"),
+        "path": fields.get("path", "-"),
         "model": fields.get("model", "-"),
         "streaming": fields.get("stream") == "1",
         "status": _int(fields.get("status")),
@@ -208,7 +213,8 @@ def exchanges(entries: list[dict]) -> list[dict]:
         if key not in by_id:
             by_id[key] = dict(entry)
             order.append(key)
-            by_id[key]["pending"] = entry["phase"] == "sent"
+            # a refused request never left, so it is not waiting for anything
+            by_id[key]["pending"] = entry["phase"] == "sent" and not entry.get("refused")
             continue
         merged = by_id[key]
         if entry["phase"] == "back":

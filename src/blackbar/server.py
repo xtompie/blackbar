@@ -124,9 +124,10 @@ def _routes(state: ProxyState) -> list[Route]:
 def _refuse(request: Request, state: ProxyState | None = None) -> Response:
     """An endpoint we do not redact must not carry data out behind our back."""
     if state is not None:
-        refused = RequestEvent(status=501, refused="unhandled_endpoint")
-        state.sent(refused)
-        state.back(refused)
+        state.sent(RequestEvent(
+            status=501, refused="unhandled_endpoint",
+            path=f"{request.method}:{request.url.path}",
+        ))
     return JSONResponse(
         {"error": {
             "type": "blackbar_unhandled_endpoint",
@@ -145,7 +146,6 @@ def _refuse_attachment(state: ProxyState, event: RequestEvent, kinds: list[str])
     event.status = 501
     event.refused = "attachment"
     state.sent(event)
-    state.back(event)
     listed = ", ".join(sorted(set(kinds)))
     return JSONResponse(
         {"error": {
@@ -187,6 +187,7 @@ async def _handle_messages(state: ProxyState, request: Request) -> Response:
 
     started = time.perf_counter()
     event = RequestEvent(
+        path=request.url.path,
         model=str(body.get("model") or ""),
         streaming=bool(body.get("stream")),
         session=session_key(body, request.headers.get("user-agent", "")),

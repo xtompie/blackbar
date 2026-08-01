@@ -143,6 +143,10 @@ async def test_unhandled_post_is_refused_not_forwarded(proxy):
     assert response.json()["error"]["type"] == "blackbar_unhandled_endpoint"
     assert "body" not in SEEN
 
+    from blackbar.stats import exchanges, read_lines
+    refusal = exchanges(read_lines(proxy.state.proxy.config.requests_path))[-1]
+    assert refusal["path"] == "POST:/v1/experimental/thing"
+
 
 async def test_count_tokens_is_redacted(proxy):
     """Same payload as /v1/messages, so it goes through the same redaction."""
@@ -269,7 +273,9 @@ async def test_refusal_is_written_to_the_log(proxy):
     from blackbar.stats import exchanges
     latest = exchanges(read_lines(proxy.state.proxy.config.requests_path))[-1]
     assert latest["refused"] == "attachment"
-    assert latest["status"] == 501
+    # a refusal is one line: it never went anywhere, so nothing comes back
+    assert latest["phase"] == "sent"
+    assert latest["pending"] is False
 
 
 async def test_a_csv_attachment_is_read_and_redacted(proxy):

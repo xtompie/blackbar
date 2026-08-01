@@ -142,11 +142,10 @@ value again.
 `blackbar watch` reads the same file:
 
 ```
-15:48:47 #1 → email:1  person:1 260ms scanning 132 chars
-15:48:47 #2 → email:1  person:1 267ms scanning 132 chars
-15:48:47 #1 ← nothing to restore status 401 · 543ms
-15:48:47 #2 ← nothing to restore status 401 · 587ms
-15:48:48 #4 refused: unhandled_endpoint
+16:53:59 #1 → email:1 372ms scanning 10 chars
+16:53:59 #1 ← nothing to restore status 401 · 658ms
+16:53:59 #2 refused: unhandled_endpoint POST:/v1/skills/sync
+16:53:59 #3 refused: unhandled_endpoint PUT:/v1/memory_stores/abc
 ```
 
 The file records what happened, never what was in it — the keys are hashes.

@@ -263,7 +263,8 @@ def last(n: int = typer.Option(5, "-n", help="how many recent requests")) -> Non
     for entry in all_entries[-n:]:
         stamp = time.strftime("%H:%M:%S", time.localtime(entry["ts"]))
         if entry.get("refused"):
-            print(f"{stamp} {DIM}#{entry['id']}{OFF} {RED}refused: {entry['refused']}{OFF}")
+            print(f"{stamp} {DIM}#{entry['id']}{OFF} {RED}refused: {entry['refused']}{OFF} "
+                  f"{DIM}{entry.get('path', '-')}{OFF}")
             continue
         print(
             f"{stamp} {DIM}#{entry['id']} {entry['model']} session:{entry['session']}{OFF}"
@@ -964,7 +965,8 @@ def _format_event(event: dict) -> str:
     tag = f"{stamp} {DIM}#{event['id']}{OFF}"
 
     if event.get("refused"):
-        return f"{tag} {RED}refused: {event['refused']}{OFF}"
+        where = event.get("path", "-")
+        return f"{tag} {RED}refused: {event['refused']}{OFF} {DIM}{where}{OFF}"
 
     if event.get("phase") == "back":
         parts = [tag, f"{DIM}←{OFF}"]
