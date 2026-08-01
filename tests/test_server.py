@@ -170,7 +170,8 @@ async def test_request_lands_in_the_log_file(proxy):
     raw = path.read_text(encoding="utf-8").strip()
     assert "jan@example.com" not in raw
 
-    latest = read_lines(path, limit=1)[0]
+    from blackbar.stats import exchanges
+    latest = exchanges(read_lines(path))[-1]
     assert latest["masked"] == 1
     assert latest["restored"] == 1
     assert latest["orphans"] == 0
@@ -265,7 +266,8 @@ async def test_refusal_is_written_to_the_log(proxy):
             {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBOR"}},
         ]}],
     })
-    latest = read_lines(proxy.state.proxy.config.requests_path, limit=1)[0]
+    from blackbar.stats import exchanges
+    latest = exchanges(read_lines(proxy.state.proxy.config.requests_path))[-1]
     assert latest["refused"] == "attachment"
     assert latest["status"] == 501
 
@@ -317,3 +319,42 @@ async def test_allow_list_can_be_reloaded_without_a_restart(proxy):
         response = await client.post("/_admin/allow/reload")
     assert response.json()["allow"] == ["image/png"]
     assert proxy.state.proxy.config.allow == ["image/png"]
+
+
+async def test_a_request_is_logged_before_the_reply_arrives(proxy):
+    """A long request has to be visible while it runs, not only once it finishes."""
+    from blackbar.stats import exchanges, read_lines
+
+    path = proxy.state.proxy.config.requests_path
+    await _call(proxy, "/v1/messages", json={
+        "model": "claude-opus-5",
+        "messages": [{"role": "user", "content": "write to jan@example.com"}],
+    })
+    phases = [entry["phase"] for entry in read_lines(path)]
+    assert phases == ["sent", "back"]
+
+    exchange = exchanges(read_lines(path))[-1]
+    assert exchange["masked"] == 1          # from the sent line
+    assert exchange["status"] == 200        # from the back line
+    assert exchange["pending"] is False
+
+
+async def test_parallel_windows_do_not_corrupt_each_other(proxy):
+    """Several Claude Code windows write at once; lines interleave, none is mangled."""
+    import asyncio
+    from blackbar.stats import exchanges, read_lines
+
+    path = proxy.state.proxy.config.requests_path
+    await asyncio.gather(*[
+        _call(proxy, "/v1/messages", json={
+            "model": "claude-opus-5",
+            "messages": [{"role": "user", "content": f"window {i}: write to user{i}@example.com"}],
+        })
+        for i in range(6)
+    ])
+    entries = read_lines(path)
+    assert len(entries) == 12                       # every line parsed
+    paired = exchanges(entries)
+    assert len(paired) == 6
+    assert all(not e["pending"] for e in paired)    # every request got its reply
+    assert all(e["masked"] == 1 for e in paired)

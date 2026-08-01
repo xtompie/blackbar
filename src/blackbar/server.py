@@ -22,7 +22,7 @@ from .detect.regexes import RegexDetector
 from .detect.rules import RulesDetector
 from .proxy import handle_attachments, redact_request, restore_all, restore_response, session_key
 from .sse import SSERewriter
-from .stats import RequestEvent, RequestLog, read_lines, summary
+from .stats import RequestEvent, RequestLog, exchanges, read_lines, summary
 from .vault import Vault
 
 # Endpoints that carry a prompt and are therefore redacted. Anything else that could
@@ -58,8 +58,13 @@ class ProxyState:
         )
         self.client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=None, write=60.0))
 
-    def record(self, event: RequestEvent) -> None:
-        self.log.record(event)
+    def sent(self, event: RequestEvent) -> None:
+        """Written before the request goes upstream, so a slow one is visible while it
+        is still running."""
+        self.log.record_sent(event)
+
+    def back(self, event: RequestEvent) -> None:
+        self.log.record_back(event)
 
 
 class _NullDetector:
@@ -118,7 +123,9 @@ def _routes(state: ProxyState) -> list[Route]:
 def _refuse(request: Request, state: ProxyState | None = None) -> Response:
     """An endpoint we do not redact must not carry data out behind our back."""
     if state is not None:
-        state.record(RequestEvent(status=501, refused="unhandled_endpoint"))
+        refused = RequestEvent(status=501, refused="unhandled_endpoint")
+        state.sent(refused)
+        state.back(refused)
     return JSONResponse(
         {"error": {
             "type": "blackbar_unhandled_endpoint",
@@ -136,7 +143,8 @@ def _refuse_attachment(state: ProxyState, event: RequestEvent, kinds: list[str])
     cannot redact it, so it does not leave the machine through us."""
     event.status = 501
     event.refused = "attachment"
-    state.record(event)
+    state.sent(event)
+    state.back(event)
     listed = ", ".join(sorted(set(kinds)))
     return JSONResponse(
         {"error": {
@@ -204,6 +212,7 @@ async def _handle_messages(state: ProxyState, request: Request) -> Response:
         url = f"{url}?{request.url.query}"
     headers = _forward_headers(request)
     state.request_count += 1
+    state.sent(event)
 
     if body.get("stream"):
         return await _stream_response(state, url, headers, payload, event, started)
@@ -213,7 +222,7 @@ async def _handle_messages(state: ProxyState, request: Request) -> Response:
     except httpx.HTTPError as exc:
         event.status = 502
         event.total_ms = (time.perf_counter() - started) * 1000
-        state.record(event)
+        state.back(event)
         return JSONResponse({"error": {"type": "blackbar_upstream_error", "message": str(exc)}}, status_code=502)
 
     event.status = upstream.status_code
@@ -235,7 +244,7 @@ async def _handle_messages(state: ProxyState, request: Request) -> Response:
             content = json.dumps(data, ensure_ascii=False).encode("utf-8")
 
     event.total_ms = (time.perf_counter() - started) * 1000
-    state.record(event)
+    state.back(event)
     return Response(content=content, status_code=upstream.status_code, headers=_response_headers(upstream))
 
 
@@ -253,7 +262,7 @@ async def _stream_response(
     except httpx.HTTPError as exc:
         event.status = 502
         event.total_ms = (time.perf_counter() - started) * 1000
-        state.record(event)
+        state.back(event)
         return JSONResponse({"error": {"type": "blackbar_upstream_error", "message": str(exc)}}, status_code=502)
 
     event.status = upstream.status_code
@@ -274,7 +283,7 @@ async def _stream_response(
             event.orphans = orphans
             raw_body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         event.total_ms = (time.perf_counter() - started) * 1000
-        state.record(event)
+        state.back(event)
         return Response(content=raw_body, status_code=upstream.status_code, headers=_response_headers(upstream))
 
     rewriter = SSERewriter(state.vault)
@@ -294,7 +303,7 @@ async def _stream_response(
             event.orphans = rewriter.stats.orphans
             event.usage = rewriter.stats.usage
             event.total_ms = (time.perf_counter() - started) * 1000
-            state.record(event)
+            state.back(event)
 
     return StreamingResponse(
         body_stream(),
@@ -358,7 +367,7 @@ def _admin_status(state: ProxyState):
             "version": __version__,
             "uptime_s": round(time.time() - state.started_at, 1),
             "port": state.config.port,
-            "requests": len(since_start),
+            "requests": len(exchanges(since_start)),
             "model": state.config.model,
             "model_loaded": bool(state.gliner and state.gliner.loaded),
             "model_error": state.gliner.error if state.gliner else None,
@@ -393,7 +402,7 @@ def _admin_stats(state: ProxyState):
 def _admin_last(state: ProxyState):
     async def handler(request: Request) -> Response:
         limit = int(request.query_params.get("n", 5))
-        entries = read_lines(state.config.requests_path, limit=limit)
+        entries = exchanges(read_lines(state.config.requests_path))[-limit:]
         return JSONResponse({"requests": list(reversed(entries))})
     return handler
 

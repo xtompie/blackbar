@@ -1,8 +1,12 @@
 """Request log: one line per exchange, appended to a plain text file.
 
-One line covers both directions, so the fields say which one they mean: `sent_*` is what
-went to the API, `back_*` is what came out of the reply. Without that, `restored=0` reads
-like a failure, when it usually just means the model did not repeat any placeholder.
+Two lines per exchange, sharing an id: `phase=sent` the moment the redacted request goes
+out, `phase=back` when the reply is done. A request that is still running - or that never
+came back - is then visible as a `sent` with no `back`, which one line written at the end
+could never show.
+
+Appends of a single line are atomic, so several Claude Code windows writing at once
+interleave lines but never corrupt one.
 
 `~/.local/state/blackbar/requests.log` in logfmt, so `tail -f` on it works without
 blackbar in the loop at all. `watch`, `last` and `stats` all read this one file - there
@@ -48,30 +52,41 @@ class RequestEvent:
     ts: float = field(default_factory=time.time)
     id: int | None = None
 
-    def to_line(self) -> str:
+    def sent_line(self) -> str:
+        """Written as the request leaves, so long ones are visible while they run."""
         fields = [
-            ("ts", f"{self.ts:.3f}"),
+            ("ts", f"{time.time():.3f}"),
             ("id", self.id),
+            ("phase", "sent"),
             ("session", self.session or "-"),
             ("model", self.model or "-"),
             ("stream", int(self.streaming)),
-            ("status", self.status if self.status is not None else "-"),
-            # sent_chars is what detect_ms was spent on - without it a slow request
-            # looks like a mystery instead of a big file
-            ("sent_chars", self.chars),
-            ("sent_masked", self.masked),
-            ("sent_kinds", _counts(self.kinds)),
-            ("sent_layers", _counts(self.layers)),
-            ("sent_keys", ",".join(f"{kind}:{key}" for kind, key in self.keys) or "-"),
-            ("back_restored", self.restored),
-            ("back_orphans", self.orphans),
+            # chars is what detect_ms was spent on - without it a slow request looks
+            # like a mystery instead of a big file
+            ("chars", self.chars),
+            ("masked", self.masked),
+            ("kinds", _counts(self.kinds)),
+            ("layers", _counts(self.layers)),
+            ("keys", ",".join(f"{kind}:{key}" for kind, key in self.keys) or "-"),
             ("detect_ms", f"{self.detect_ms:.1f}"),
+        ]
+        if self.refused:
+            fields.append(("refused", self.refused))
+        return " ".join(f"{name}={value}" for name, value in fields)
+
+    def back_line(self) -> str:
+        fields = [
+            ("ts", f"{time.time():.3f}"),
+            ("id", self.id),
+            ("phase", "back"),
+            ("session", self.session or "-"),
+            ("status", self.status if self.status is not None else "-"),
+            ("restored", self.restored),
+            ("orphans", self.orphans),
             ("total_ms", f"{self.total_ms:.1f}"),
             ("cache_read", self.usage.get("cache_read_input_tokens") or 0),
             ("input_tokens", self.usage.get("input_tokens") or 0),
         ]
-        if self.refused:
-            fields.append(("refused", self.refused))
         return " ".join(f"{name}={value}" for name, value in fields)
 
 
@@ -91,21 +106,22 @@ def parse_line(line: str) -> dict | None:
     return {
         "ts": float(fields["ts"]),
         "id": _int(fields.get("id")),
+        "phase": fields.get("phase", "sent"),
         "session": fields.get("session", "-"),
         "model": fields.get("model", "-"),
         "streaming": fields.get("stream") == "1",
         "status": _int(fields.get("status")),
-        "chars": _int(fields.get("sent_chars")) or 0,
-        "masked": _int(fields.get("sent_masked")) or 0,
-        "restored": _int(fields.get("back_restored")) or 0,
-        "orphans": _int(fields.get("back_orphans")) or 0,
+        "chars": _int(fields.get("chars")) or 0,
+        "masked": _int(fields.get("masked")) or 0,
+        "restored": _int(fields.get("restored")) or 0,
+        "orphans": _int(fields.get("orphans")) or 0,
         "detect_ms": _float(fields.get("detect_ms")),
         "total_ms": _float(fields.get("total_ms")),
-        "kinds": _pairs(fields.get("sent_kinds")),
-        "layers": _pairs(fields.get("sent_layers")),
+        "kinds": _pairs(fields.get("kinds")),
+        "layers": _pairs(fields.get("layers")),
         "keys": [
             tuple(item.split(":", 1))
-            for item in (fields.get("sent_keys", "-") or "-").split(",")
+            for item in (fields.get("keys", "-") or "-").split(",")
             if item and item != "-" and ":" in item
         ],
         "refused": None if fields.get("refused", "-") == "-" else fields.get("refused"),
@@ -145,13 +161,21 @@ class RequestLog:
         self.path = path
         self._next_id = _last_id(path) + 1
 
-    def record(self, event: RequestEvent) -> int:
+    def record_sent(self, event: RequestEvent) -> int:
         event.id = self._next_id
         self._next_id += 1
-        self._rotate_if_needed()
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(event.to_line() + "\n")
+        self._append(event.sent_line())
         return event.id
+
+    def record_back(self, event: RequestEvent) -> None:
+        self._append(event.back_line())
+
+    def _append(self, line: str) -> None:
+        self._rotate_if_needed()
+        # One write, one line: O_APPEND makes this atomic, so parallel windows
+        # interleave lines instead of corrupting them.
+        with self.path.open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
 
     def _rotate_if_needed(self) -> None:
         try:
@@ -174,7 +198,34 @@ def read_lines(path: Path, limit: int | None = None, since: float | None = None)
     return entries[-limit:] if limit else entries
 
 
+def exchanges(entries: list[dict]) -> list[dict]:
+    """Pairs the two lines of an exchange by id. A `sent` with no `back` is a request
+    that is still running, or one that never came back."""
+    by_id: dict[int, dict] = {}
+    order: list[int] = []
+    for entry in entries:
+        key = entry["id"]
+        if key not in by_id:
+            by_id[key] = dict(entry)
+            order.append(key)
+            by_id[key]["pending"] = entry["phase"] == "sent"
+            continue
+        merged = by_id[key]
+        if entry["phase"] == "back":
+            merged.update({
+                "status": entry["status"], "restored": entry["restored"],
+                "orphans": entry["orphans"], "total_ms": entry["total_ms"],
+                "cache_read": entry["cache_read"], "input_tokens": entry["input_tokens"],
+                "pending": False,
+            })
+        else:
+            merged.update({k: v for k, v in entry.items() if k != "phase"})
+            merged["pending"] = False
+    return [by_id[key] for key in order]
+
+
 def summary(entries: list[dict]) -> dict:
+    entries = exchanges(entries)
     kinds: Counter[str] = Counter()
     layers: Counter[str] = Counter()
     sessions: dict[str, dict] = {}

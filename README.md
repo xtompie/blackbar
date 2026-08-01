@@ -114,27 +114,35 @@ refused rather than forwarded unredacted.
 
 ## The log
 
-One line per exchange, in `~/.local/state/blackbar/requests.log`. `sent_*` is what went
-to the API, `back_*` is what came out of the reply:
+Two lines per exchange in `~/.local/state/blackbar/requests.log`, sharing an `id`:
+`phase=sent` the moment the redacted request goes out, `phase=back` when the reply is
+done.
 
 ```
-ts=1785590116.888 id=1 session=c87238 model=claude-opus-5 stream=0 status=401
-sent_chars=134 sent_masked=2 sent_kinds=email:1,person:1 sent_layers=gliner:1,regex:1
-sent_keys=person:a93d8e,email:0e02ac back_restored=0 back_orphans=0
-detect_ms=3620.5 total_ms=4265.6 cache_read=0 input_tokens=0
+ts=1785592127.227 id=1 phase=sent session=c87238 model=claude-opus-5 stream=0
+chars=132 masked=2 kinds=email:1,person:1 layers=gliner:1,regex:1
+keys=person:719c22,email:89c66f detect_ms=260.5
+
+ts=1785592127.510 id=1 phase=back session=c87238 status=401 restored=0 orphans=0
+total_ms=543.2 cache_read=0 input_tokens=0
 ```
 
-`back_restored=0` is normal - it means the model did not repeat any placeholder in its
-answer. The number that matters is `back_orphans`: anything above zero is a placeholder
-that came back mangled and could not be turned into a value again. A refused request
-carries `refused=unhandled_endpoint` or `refused=attachment` instead.
+A slow request is visible while it is still running, and one that never came back stays
+a `sent` with no `back`. Several Claude Code windows can write at once - lines interleave,
+but a single line is written in one append, so none of them is ever mangled.
 
-`blackbar watch` reads the same file and drops the zeros:
+`restored=0` is normal: it means the model did not repeat any placeholder. The number to
+watch is `orphans` - anything above zero came back mangled and could not be turned into a
+value again.
+
+`blackbar watch` reads the same file:
 
 ```
-15:15:16 #1 → email:1  person:1 3620ms scanning 134 chars
-15:15:21 #2 → nothing to mask 2988ms scanning 114 chars
-15:15:24 #3 refused: unhandled_endpoint
+15:48:47 #1 → email:1  person:1 260ms scanning 132 chars
+15:48:47 #2 → email:1  person:1 267ms scanning 132 chars
+15:48:47 #1 ← nothing to restore status 401 · 543ms
+15:48:47 #2 ← nothing to restore status 401 · 587ms
+15:48:48 #4 refused: unhandled_endpoint
 ```
 
 The file records what happened, never what was in it — the keys are hashes.

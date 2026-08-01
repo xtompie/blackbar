@@ -258,7 +258,9 @@ def _print_values(config, keys: list, cache: dict[str, str]) -> None:
 def last(n: int = typer.Option(5, "-n", help="how many recent requests")) -> None:
     """Details of recent requests (kinds and keys, never values)."""
     config = _config()
-    for entry in stats_mod.read_lines(config.requests_path, limit=n):
+    # the log has two lines per exchange, so pair them up before taking the last n
+    all_entries = stats_mod.exchanges(stats_mod.read_lines(config.requests_path))
+    for entry in all_entries[-n:]:
         stamp = time.strftime("%H:%M:%S", time.localtime(entry["ts"]))
         if entry.get("refused"):
             print(f"{stamp} {DIM}#{entry['id']}{OFF} {RED}refused: {entry['refused']}{OFF}")
@@ -272,8 +274,11 @@ def last(n: int = typer.Option(5, "-n", help="how many recent requests")) -> Non
         back = f"{entry['restored']} restored"
         if entry["orphans"]:
             back += f", {RED}{entry['orphans']} NOT restored{OFF}"
-        print(f"    {DIM}back{OFF}  {back} {DIM}(status {entry['status']}, "
-              f"{entry['total_ms']:.0f}ms total){OFF}")
+        if entry.get("pending"):
+            print(f"    {YELLOW}back{OFF}  still running - no reply yet")
+        else:
+            print(f"    {DIM}back{OFF}  {back} {DIM}(status {entry['status']}, "
+                  f"{entry['total_ms']:.0f}ms total){OFF}")
 
 
 @app.command()
@@ -885,21 +890,27 @@ def _duration(seconds: float) -> str:
 
 
 def _format_event(event: dict) -> str:
-    """One line per exchange. A zero says nothing, so zeros are left out - except
-    orphans, where a zero is the good news and any other number is the alarm."""
+    """One line per phase, as it happens: the request when it leaves, the reply when it
+    lands. Zeros are left out - except orphans, where anything but zero is the alarm."""
     stamp = time.strftime("%H:%M:%S", time.localtime(event["ts"]))
-    parts = [stamp, f"{DIM}#{event['id']}{OFF}"]
+    tag = f"{stamp} {DIM}#{event['id']}{OFF}"
 
     if event.get("refused"):
-        return f"{stamp} {DIM}#{event['id']}{OFF} {RED}refused: {event['refused']}{OFF}"
+        return f"{tag} {RED}refused: {event['refused']}{OFF}"
+
+    if event.get("phase") == "back":
+        parts = [tag, f"{DIM}←{OFF}"]
+        if event.get("orphans"):
+            parts.append(f"{RED}{event['orphans']} NOT restored{OFF}")
+        elif event.get("restored"):
+            parts.append(f"{event['restored']} restored")
+        else:
+            parts.append(f"{DIM}nothing to restore{OFF}")
+        parts.append(f"{DIM}status {event.get('status')} · {event.get('total_ms', 0):.0f}ms{OFF}")
+        return " ".join(parts)
 
     kinds = _kinds(event.get("kinds") or {})
-    parts.append(f"{DIM}→{OFF} {kinds}" if kinds else f"{DIM}→ nothing to mask{OFF}")
-    if event.get("restored"):
-        parts.append(f"{DIM}←{OFF} {event['restored']} restored")
-    if event.get("orphans"):
-        parts.append(f"{RED}← {event['orphans']} NOT restored{OFF}")
-
+    parts = [tag, f"{DIM}→{OFF}", kinds or f"{DIM}nothing to mask{OFF}"]
     detect = event.get("detect_ms") or 0
     if detect >= 1:
         parts.append(f"{DIM}{detect:.0f}ms scanning {event.get('chars', 0)} chars{OFF}")
