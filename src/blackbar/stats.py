@@ -23,10 +23,10 @@ MAX_BYTES = 5 * 1024 * 1024
 
 @dataclass
 class RequestEvent:
-    provider: str
     session: str | None = None
     model: str | None = None
     streaming: bool = False
+    chars: int = 0
     masked: int = 0
     restored: int = 0
     orphans: int = 0
@@ -48,11 +48,13 @@ class RequestEvent:
         fields = [
             ("ts", f"{self.ts:.3f}"),
             ("id", self.id),
-            ("provider", self.provider),
             ("session", self.session or "-"),
             ("model", self.model or "-"),
             ("stream", int(self.streaming)),
             ("status", self.status if self.status is not None else "-"),
+            # chars is what detect_ms is spent on - without it a slow request looks
+            # like a mystery instead of a big file
+            ("chars", self.chars),
             ("masked", self.masked),
             ("restored", self.restored),
             ("orphans", self.orphans),
@@ -61,10 +63,11 @@ class RequestEvent:
             ("kinds", _counts(self.kinds)),
             ("layers", _counts(self.layers)),
             ("keys", ",".join(f"{kind}:{key}" for kind, key in self.keys) or "-"),
-            ("refused", self.refused or "-"),
             ("cache_read", self.usage.get("cache_read_input_tokens") or 0),
             ("input_tokens", self.usage.get("input_tokens") or 0),
         ]
+        if self.refused:
+            fields.append(("refused", self.refused))
         return " ".join(f"{name}={value}" for name, value in fields)
 
 
@@ -84,11 +87,11 @@ def parse_line(line: str) -> dict | None:
     return {
         "ts": float(fields["ts"]),
         "id": _int(fields.get("id")),
-        "provider": fields.get("provider", "-"),
         "session": fields.get("session", "-"),
         "model": fields.get("model", "-"),
         "streaming": fields.get("stream") == "1",
         "status": _int(fields.get("status")),
+        "chars": _int(fields.get("chars")) or 0,
         "masked": _int(fields.get("masked")) or 0,
         "restored": _int(fields.get("restored")) or 0,
         "orphans": _int(fields.get("orphans")) or 0,

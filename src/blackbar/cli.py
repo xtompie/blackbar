@@ -264,7 +264,7 @@ def last(n: int = typer.Option(5, "-n", help="how many recent requests")) -> Non
         if entry["orphans"]:
             flags.append(f"{RED}orphans:{entry['orphans']}{OFF}")
         print(
-            f"{stamp} {DIM}#{entry['id']}{OFF} {entry['provider']} "
+            f"{stamp} {DIM}#{entry['id']}{OFF} "
             f"{DIM}{entry['model']}{OFF} session:{entry['session']} "
             f"masked:{entry['masked']} restored:{entry['restored']} "
             f"{DIM}+{entry['detect_ms']:.0f}ms detect / {entry['total_ms']:.0f}ms total{OFF} "
@@ -888,7 +888,7 @@ def _format_event(event: dict) -> str:
     orphans = event.get("orphans") or 0
     tail = f" {RED}orphans:{orphans}{OFF}" if orphans else ""
     return (
-        f"{stamp} {event['provider']} {DIM}#{event['id']}{OFF} "
+        f"{stamp} {DIM}#{event['id']}{OFF} "
         f"{kinds or DIM + 'none' + OFF} "
         f"restored:{event['restored']} {DIM}+{event['detect_ms']:.0f}ms{OFF}{tail}"
     )

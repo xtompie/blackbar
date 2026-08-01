@@ -117,11 +117,15 @@ refused rather than forwarded unredacted.
 One line per request, in `~/.local/state/blackbar/requests.log`:
 
 ```
-ts=1785571185.815 id=1 provider=anthropic session=c87238 model=claude-opus-5 stream=0
-status=200 masked=2 restored=2 orphans=0 detect_ms=500.5 total_ms=833.9
-kinds=email:1,person:1 layers=gliner:1,regex:1 keys=person:28674a,email:18807e
-refused=- cache_read=0 input_tokens=0
+ts=1785589854.174 id=1 session=c87238 model=claude-opus-5 stream=0 status=401
+chars=140 masked=2 restored=0 orphans=0 detect_ms=244.2 total_ms=598.5
+kinds=email:1,person:1 layers=gliner:1,regex:1 keys=person:2235e5,email:95bc08
+cache_read=0 input_tokens=0
 ```
+
+`chars` is how much text was scanned, which is what `detect_ms` was spent on. A refused
+request adds `refused=unhandled_endpoint` or `refused=attachment` at the end.
+
 
 It records what happened, never what was in it — the keys are hashes. `watch --reveal`
 resolves them against the running daemon; it and `vault show` are the only commands that

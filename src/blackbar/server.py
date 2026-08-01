@@ -118,7 +118,7 @@ def _routes(state: ProxyState) -> list[Route]:
 def _refuse(request: Request, state: ProxyState | None = None) -> Response:
     """An endpoint we do not redact must not carry data out behind our back."""
     if state is not None:
-        state.record(RequestEvent(provider="anthropic", status=501, refused="unhandled_endpoint"))
+        state.record(RequestEvent(status=501, refused="unhandled_endpoint"))
     return JSONResponse(
         {"error": {
             "type": "blackbar_unhandled_endpoint",
@@ -178,7 +178,6 @@ async def _handle_messages(state: ProxyState, request: Request) -> Response:
 
     started = time.perf_counter()
     event = RequestEvent(
-        provider="anthropic",
         model=str(body.get("model") or ""),
         streaming=bool(body.get("stream")),
         session=session_key(body, request.headers.get("user-agent", "")),
@@ -197,6 +196,7 @@ async def _handle_messages(state: ProxyState, request: Request) -> Response:
     event.layers = dict(layers)
     event.masked = masked
     event.keys = keys
+    event.chars = len(raw)
     payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
 
     url = f"{state.config.upstream}{request.url.path}"
