@@ -9,7 +9,7 @@ and addresses do not follow a pattern, so a regex will not catch them, and shipp
 text to a cloud classifier would just move the leak to another vendor. Nothing leaves
 the machine, not even the step that decides what is confidential.
 
-![Values are replaced on the way out and restored on the way back; the real ones never cross the bar](demo/blackbar-demo.gif)
+![A request going through blackbar: the name is replaced on the way out and put back in the reply](demo/blackbar-demo.gif)
 
 ## Install
 
