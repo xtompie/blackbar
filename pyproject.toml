@@ -1,7 +1,7 @@
 [project]
 name = "blackbar"
 version = "0.1.0"
-description = "Lokalne proxy redakcji danych poufnych dla Claude Code"
+description = "Local proxy that redacts sensitive data for Claude Code"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
