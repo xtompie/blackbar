@@ -39,8 +39,8 @@ def launch(config: Config, args: list[str], *, quiet: bool = False) -> int:
     if not daemon.is_ready(config):
         # A request landing mid-load would just sit there; better to say why.
         if not quiet:
-            print("blackbar: loading the detection model - about 15 seconds, once per start",
-                  file=sys.stderr)
+            print("blackbar: daemon is starting up - loading the detection model, about "
+                  "15 seconds. Later windows start instantly.", file=sys.stderr)
         daemon.wait_until_ready(config)
 
     url = config.base_url
