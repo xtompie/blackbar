@@ -598,6 +598,67 @@ def detach() -> None:
         print(f"{DIM}was not attached{OFF}")
 
 
+allow_app = typer.Typer(help="File types sent through unredacted.", no_args_is_help=True)
+app.add_typer(allow_app, name="allow")
+
+
+@allow_app.command("list")
+def allow_list() -> None:
+    """Types that are sent as-is, and types that are read and redacted."""
+    from .attachments import supported_types
+
+    config = _config()
+    print(f"{BOLD}read and redacted{OFF}  {', '.join(supported_types())}")
+    if config.allow:
+        print(f"{YELLOW}{BOLD}sent as-is{OFF}         {', '.join(config.allow)}  {YELLOW}⚠ not redacted{OFF}")
+    else:
+        print(f"{BOLD}sent as-is{OFF}         {DIM}none - anything unreadable is refused{OFF}")
+
+
+@allow_app.command("add")
+def allow_add(
+    media_type: str = typer.Argument(..., help="e.g. image/png"),
+    yes: bool = typer.Option(False, "--yes", "-y"),
+) -> None:
+    """⚠ Let a type through without redaction."""
+    from .attachments import reader_for
+
+    config = _config()
+    if media_type in config.allow:
+        print(f"{DIM}already allowed{OFF}")
+        return
+    if reader_for(media_type) is not None:
+        print(f"{DIM}note: {media_type} is already read and redacted; allowing it means "
+              f"sending the raw file instead{OFF}")
+    print(f"{YELLOW}⚠ {media_type} will be sent to the API exactly as it is - "
+          f"blackbar will not look inside it.{OFF}")
+    if not yes and not typer.confirm("Continue?", default=False):
+        raise typer.Exit(1)
+    _write_allow(config, [*config.allow, media_type])
+    print(f"{GREEN}▮{OFF} {media_type} allowed")
+
+
+@allow_app.command("remove")
+def allow_remove(media_type: str = typer.Argument(..., help="e.g. image/png")) -> None:
+    """Stop sending a type; it goes back to being refused."""
+    config = _config()
+    if media_type not in config.allow:
+        print(f"{DIM}not in the list{OFF}")
+        return
+    _write_allow(config, [item for item in config.allow if item != media_type])
+    print(f"{media_type} removed - requests carrying it will be refused again")
+
+
+def _write_allow(config, values: list[str]) -> None:
+    import json
+
+    config_mod.set_value("attachments.allow", json.dumps(values))
+    if daemon.is_running(config):
+        daemon.admin_post(config, "allow/reload")
+    else:
+        print(f"{DIM}daemon not running - the change applies at start{OFF}")
+
+
 # --- configuration and diagnostics --------------------------------------------
 
 config_app = typer.Typer(help="Configuration.", no_args_is_help=True)

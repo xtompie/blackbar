@@ -111,12 +111,13 @@ other text, and sent as text. The model reads the document; it never reads the r
 values in it. What it loses is the layout.
 
 Whatever cannot be read - a screenshot, a scanned PDF with no text layer - is refused.
-To send such a file anyway, name its type in the config; it then travels exactly as it
-is, unredacted, and `blackbar status` says so in yellow:
+To send such a file anyway, allow its type; it then travels exactly as it is, unredacted,
+and both `blackbar status` and `blackbar allow list` say so in yellow:
 
-```toml
-[attachments]
-allow = ["image/png"]
+```bash
+blackbar allow list
+blackbar allow add image/png     # ⚠ sent as-is, not redacted
+blackbar allow remove image/png
 ```
 
 Everything runs locally. No classifier calls out to the cloud - that would just move the

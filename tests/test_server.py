@@ -303,3 +303,17 @@ async def _admin(app, path):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://proxy") as client:
         response = await client.get(path)
     return response.json()
+
+
+async def test_allow_list_can_be_reloaded_without_a_restart(proxy):
+    """`blackbar allow add` writes the config, then asks the daemon to re-read it."""
+    from blackbar.config import DEFAULT_CONFIG
+
+    path = proxy.state.proxy.config.path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(DEFAULT_CONFIG.replace("allow = []", 'allow = ["image/png"]'), encoding="utf-8")
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(proxy), base_url="http://proxy") as client:
+        response = await client.post("/_admin/allow/reload")
+    assert response.json()["allow"] == ["image/png"]
+    assert proxy.state.proxy.config.allow == ["image/png"]

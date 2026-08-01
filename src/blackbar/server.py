@@ -105,6 +105,7 @@ def _routes(state: ProxyState) -> list[Route]:
         Route("/_admin/vault/clear", _admin_vault_clear(state), methods=["POST"]),
         Route("/_admin/rules/reload", _admin_rules_reload(state), methods=["POST"]),
         Route("/_admin/test", _admin_test(state), methods=["POST"]),
+        Route("/_admin/allow/reload", _admin_allow_reload(state), methods=["POST"]),
         Route("/v1/messages", messages, methods=["POST"]),
         Route("/v1/messages/count_tokens", messages, methods=["POST"]),
         # Reads cannot carry a prompt in the body, so they pass through.
@@ -412,6 +413,16 @@ def _admin_rules_reload(state: ProxyState):
     async def handler(request: Request) -> Response:
         state.rules.reload()
         return JSONResponse({"count": state.rules.count, "error": state.rules.error})
+    return handler
+
+
+def _admin_allow_reload(state: ProxyState):
+    """Re-reads attachments.allow from the config file, so the change is live."""
+    async def handler(request: Request) -> Response:
+        from .config import load
+
+        state.config.allow = load(state.config.path).allow
+        return JSONResponse({"allow": state.config.allow})
     return handler
 
 
