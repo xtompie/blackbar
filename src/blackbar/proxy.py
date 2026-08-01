@@ -23,14 +23,20 @@ async def redact_request(
 ) -> tuple[Counter[str], Counter[str], int, list[tuple[str, str]]]:
     """Redacts the body in place.
 
-    Returns (kinds, layers, replacement count, [(kind, vault key)]).
+    Returns (kinds, layers, replacement count, [(kind, vault key)], characters scanned).
+
+    The character count is what was handed to the scanner, not the size of the request:
+    a body is mostly tool definitions, which are never scanned.
     """
     kinds: Counter[str] = Counter()
     layers: Counter[str] = Counter()
     keys: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
+    scanned = 0
 
     async def scan(text: str) -> str:
+        nonlocal scanned
+        scanned += len(text)
         masked, hit_kinds, hit_layers, hit_keys = await redactor.redact(text)
         kinds.update(hit_kinds)
         layers.update(hit_layers)
@@ -58,7 +64,7 @@ async def redact_request(
             for block in content:
                 await _scan_block(block, scan)
 
-    return kinds, layers, sum(kinds.values()), keys
+    return kinds, layers, sum(kinds.values()), keys, scanned
 
 
 async def _scan_block(block: dict, scan) -> None:

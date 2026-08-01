@@ -198,13 +198,13 @@ async def _handle_messages(state: ProxyState, request: Request) -> Response:
         return _refuse_attachment(state, event, opaque)
 
     detect_started = time.perf_counter()
-    kinds, layers, masked, keys = await redact_request(body, state.redactor)
+    kinds, layers, masked, keys, scanned = await redact_request(body, state.redactor)
     event.detect_ms = (time.perf_counter() - detect_started) * 1000
     event.kinds = dict(kinds)
     event.layers = dict(layers)
     event.masked = masked
     event.keys = keys
-    event.chars = len(raw)
+    event.chars = scanned
     payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
 
     url = f"{state.config.upstream}{request.url.path}"

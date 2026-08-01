@@ -127,6 +127,9 @@ ts=1785592127.510 id=1 phase=back session=c87238 status=401 restored=0 orphans=0
 total_ms=543.2 cache_read=0 input_tokens=0
 ```
 
+`chars` is how much text was handed to the scanner, which is what `detect_ms` was spent
+on - not the size of the request, which is mostly tool definitions we never read.
+
 A slow request is visible while it is still running, and one that never came back stays
 a `sent` with no `back`. Several Claude Code windows can write at once - lines interleave,
 but a single line is written in one append, so none of them is ever mangled.
