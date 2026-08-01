@@ -34,10 +34,19 @@ class Redactor:
         self._cache: OrderedDict[str, tuple[str, tuple[tuple[str, str], ...]]] = OrderedDict()
 
     def detect_sync(self, text: str) -> list[Span]:
-        spans = self.rules.detect(text) + self.regex.detect(text)
+        spans = self._cheap_spans(text)
         if self.gliner is not None:
             spans += self.gliner.detect(text)
         return merge_spans(spans)
+
+    def _cheap_spans(self, text: str) -> list[Span]:
+        """Everything that costs no inference: own rules, regexes, and values the vault
+        has already seen."""
+        known = [
+            Span(start, end, kind, value, "vault")
+            for start, end, kind, value in self.vault.known_spans(text)
+        ]
+        return known + self.rules.detect(text) + self.regex.detect(text)
 
     async def redact(self, text: str) -> tuple[str, Counter[str], Counter[str], list[tuple[str, str]]]:
         """Returns (redacted text, hits per kind, hits per layer, [(kind, key)]).
@@ -55,7 +64,7 @@ class Redactor:
                 # GLiNER is CPU-bound: it must not run on the event loop.
                 spans = await asyncio.get_running_loop().run_in_executor(None, self.detect_sync, text)
             else:
-                spans = merge_spans(self.rules.detect(text) + self.regex.detect(text))
+                spans = merge_spans(self._cheap_spans(text))
 
             masked = apply_spans(text, spans, lambda s: self.vault.mask(s.kind, s.text))
             hits = tuple(

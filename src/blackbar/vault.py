@@ -88,6 +88,24 @@ class Vault:
 
         return PLACEHOLDER_RE.sub(_sub, text), restored, orphans
 
+    def known_spans(self, text: str) -> list[tuple[int, int, str, str]]:
+        """Finds values already in the vault: (start, end, kind, value).
+
+        Once something has been recognised as a name, it stays a name - even in a
+        sentence where the model would miss it. Costs a string search, not an inference.
+        """
+        with self._lock:
+            known = sorted(self._placeholder_by_value, key=lambda item: -len(item[1]))
+        out: list[tuple[int, int, str, str]] = []
+        for kind, value in known:
+            if len(value) < 3:
+                continue
+            start = text.find(value)
+            while start != -1:
+                out.append((start, start + len(value), kind, value))
+                start = text.find(value, start + len(value))
+        return out
+
     def stats(self) -> dict[str, int]:
         with self._lock:
             return dict(self._kind_counts)

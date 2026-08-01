@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 # Lower number wins when hits overlap.
-LAYER_PRIORITY = {"rules": 0, "regex": 1, "gliner": 2}
+LAYER_PRIORITY = {"rules": 0, "vault": 1, "regex": 2, "gliner": 3}
 
 
 @dataclass(frozen=True, slots=True)

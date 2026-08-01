@@ -77,10 +77,12 @@ def start(foreground: bool = typer.Option(False, "--foreground", "-f", help="sta
     if daemon.is_running(config):
         print(f"{DIM}daemon already running on {config.base_url}{OFF}")
         return
-    if daemon.start_background(config):
-        print(f"{GREEN}▮{OFF} daemon running on {config.base_url}")
-    else:
+    if not daemon.start_background(config):
         _die(f"did not come up in time, see {config.log_path}")
+    if not daemon.is_ready(config):
+        print(f"{DIM}loading the detection model, once per start...{OFF}", flush=True)
+        daemon.wait_until_ready(config)
+    print(f"{GREEN}▮{OFF} daemon running on {config.base_url}")
 
 
 @app.command()

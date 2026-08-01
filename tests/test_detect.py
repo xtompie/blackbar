@@ -91,3 +91,15 @@ async def test_restore_undoes_redaction(tmp_path):
     assert restored == original
     assert count == 2
     assert orphans == 0
+
+
+async def test_a_value_seen_once_is_masked_everywhere_after(tmp_path):
+    """The vault is consulted before the model: what was a name once stays a name,
+    even in a sentence the model would read differently."""
+    vault = Vault()
+    redactor = Redactor(vault, RulesDetector(tmp_path / "missing.yaml"))
+    vault.mask("person", "Jan Kowalski")
+
+    masked, kinds, layers, _ = await redactor.redact("cc Jan Kowalski on the reply")
+    assert "Jan Kowalski" not in masked
+    assert layers["vault"] == 1

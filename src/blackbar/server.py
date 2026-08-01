@@ -331,7 +331,14 @@ async def _proxy_raw(state: ProxyState, request: Request, raw: bytes) -> Respons
 
 def _admin_health(state: ProxyState):
     async def handler(request: Request) -> Response:
-        return JSONResponse({"ok": True, "version": __version__, "pid_port": state.config.port})
+        ready = state.gliner is None or state.gliner.loaded or bool(state.gliner.error)
+        return JSONResponse({
+            "ok": True,
+            "version": __version__,
+            "ready": ready,
+            "model_loaded": bool(state.gliner and state.gliner.loaded),
+            "model_error": state.gliner.error if state.gliner else None,
+        })
     return handler
 
 

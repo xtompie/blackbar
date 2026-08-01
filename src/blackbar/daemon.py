@@ -69,6 +69,22 @@ def run_foreground(config: Config) -> None:
         config.pid_path.unlink(missing_ok=True)
 
 
+def is_ready(config: Config) -> bool:
+    """Answering is not enough: loading the model takes ~20s, and a request that lands
+    during it just waits."""
+    data = health(config)
+    return bool(data and data.get("ready"))
+
+
+def wait_until_ready(config: Config, wait: float = 180.0) -> bool:
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        if is_ready(config):
+            return True
+        time.sleep(0.3)
+    return False
+
+
 def start_background(config: Config, wait: float = 20.0) -> bool:
     """Starts the daemon as an independent process. True once it answers health."""
     if is_running(config):

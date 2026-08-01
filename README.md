@@ -6,6 +6,9 @@ request leaves your machine, and puts the real values back in the reply.
 Regexes catch emails, keys and IDs. A local LLM catches names, companies and addresses.
 Nothing is sent anywhere to be classified.
 
+Starting the daemon takes about fifteen seconds - that is the model loading, once. After
+that a typical request costs a few hundred milliseconds, and repeats cost nothing.
+
 ![A request going through blackbar: the name is replaced on the way out and put back in the reply](demo/blackbar-demo.gif)
 
 ## Install
