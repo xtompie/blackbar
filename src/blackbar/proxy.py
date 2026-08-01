@@ -98,33 +98,53 @@ async def _scan_json(value, scan):
     return value
 
 
-# Blocks whose payload is base64, not text: a PDF or a screenshot. Claude Code puts them
-# inside tool_result and the API parses them on its side, so whatever is in them would
-# leave the machine untouched - we cannot read them, so we do not let them through.
-OPAQUE_BLOCKS = {"image", "document"}
+# Attachments are base64, not text. A PDF can be opened here and turned into text that
+# the normal redaction path handles; a screenshot cannot be read at all.
+def handle_attachments(body: dict, pdf_mode: str, image_mode: str) -> list[str]:
+    """Converts PDFs to text in place. Returns what is left that we cannot redact.
 
+    pdf_mode:   extract | block | send
+    image_mode: block | send
+    """
+    from .pdf import extract_text
 
-def find_opaque_blocks(body: dict) -> list[str]:
-    """Returns a description of every attachment we would not be able to redact."""
-    found: list[str] = []
+    blocked: list[str] = []
 
     def walk(content) -> None:
         if not isinstance(content, list):
             return
-        for block in content:
+        for index, block in enumerate(content):
             if not isinstance(block, dict):
                 continue
             kind = block.get("type")
-            if kind in OPAQUE_BLOCKS:
-                media = (block.get("source") or {}).get("media_type") or kind
-                found.append(str(media))
-            elif kind == "tool_result":
+
+            if kind == "tool_result":
                 walk(block.get("content"))
+                continue
+            if kind not in ("document", "image"):
+                continue
+
+            source = block.get("source") or {}
+            media = str(source.get("media_type") or kind)
+            mode = pdf_mode if kind == "document" else image_mode
+
+            if mode == "send":
+                continue
+            if kind == "document" and mode == "extract" and source.get("type") == "base64":
+                text = extract_text(str(source.get("data") or ""))
+                if text is not None:
+                    # Replaced in place, so the text goes through the same scan as
+                    # everything else in the request.
+                    content[index] = {"type": "text", "text": text}
+                    continue
+                # No text layer: this is a scan, i.e. a picture in a PDF wrapper.
+                media = f"{media} (no text layer)"
+            blocked.append(media)
 
     for message in body.get("messages") or []:
         if isinstance(message, dict):
             walk(message.get("content"))
-    return found
+    return blocked
 
 
 def restore_response(body: dict, vault: Vault) -> tuple[int, int]:

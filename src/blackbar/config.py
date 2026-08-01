@@ -26,6 +26,15 @@ threshold = 0.5
 # layers in priority order; drop "gliner" to run on rules and regexes only
 layers = ["rules", "regex", "gliner"]
 
+[attachments]
+# pdf:    extract = read the text locally, redact it, send it as text
+#         block   = refuse the request
+#         send    = pass the file through untouched (it is not redacted!)
+pdf = "extract"
+# images: block | send. There is nothing to read in a screenshot, so "send" means
+#         sending it exactly as it is, unredacted.
+images = "block"
+
 [upstream]
 url = "https://api.anthropic.com"
 """
@@ -55,6 +64,8 @@ class Config:
     threshold: float = 0.5
     layers: list[str] = field(default_factory=lambda: ["rules", "regex", "gliner"])
     upstream: str = "https://api.anthropic.com"
+    pdf: str = "extract"
+    images: str = "block"
     path: Path = field(default_factory=lambda: config_dir() / "config.toml")
 
     @property
@@ -103,6 +114,10 @@ def load(path: Path | None = None) -> Config:
     config.model = str(detection.get("model", config.model))
     config.threshold = float(detection.get("threshold", config.threshold))
     config.layers = [str(layer) for layer in detection.get("layers", config.layers)]
+
+    attachments = data.get("attachments") or {}
+    config.pdf = str(attachments.get("pdf", config.pdf))
+    config.images = str(attachments.get("images", config.images))
 
     upstream = data.get("upstream") or {}
     config.upstream = str(upstream.get("url", config.upstream)).rstrip("/")

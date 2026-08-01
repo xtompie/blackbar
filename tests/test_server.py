@@ -179,23 +179,71 @@ async def test_request_lands_in_the_log_file(proxy):
     assert latest["keys"][0][0] == "email"
 
 
-async def test_pdf_attachment_is_refused(proxy):
-    """Claude Code sends PDFs as base64 inside tool_result; we cannot read them."""
+def _pdf(*lines: str) -> str:
+    """A real one-page PDF, base64 - the same shape Claude Code sends."""
+    import base64, io
+    from reportlab.pdfgen import canvas
+
+    buf = io.BytesIO()
+    page = canvas.Canvas(buf)
+    for offset, line in enumerate(lines):
+        page.drawString(72, 800 - offset * 20, line)
+    page.showPage()
+    page.save()
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+async def test_pdf_is_read_locally_and_redacted(proxy):
+    """The PDF never leaves as a PDF: its text is extracted here and masked."""
     SEEN.clear()
     response = await _call(proxy, "/v1/messages", json={
         "model": "claude-opus-5",
         "messages": [{"role": "user", "content": [
             {"type": "tool_result", "tool_use_id": "t1", "content": [
-                {"type": "text", "text": "here it is"},
+                {"type": "text", "text": "here is the invoice"},
                 {"type": "document", "source": {
-                    "type": "base64", "media_type": "application/pdf", "data": "JVBERi0xLjQK"}},
+                    "type": "base64", "media_type": "application/pdf",
+                    "data": _pdf("Invoice 2026/07", "Contact: jan@example.com")}},
             ]},
         ]}],
     })
+    assert response.status_code == 200
+
+    sent = json.dumps(SEEN["body"])
+    assert "jan@example.com" not in sent          # the address was masked
+    assert "{{sensitive:email:" in sent
+    assert "Invoice 2026/07" in sent              # the rest of the text got through
+    assert '"document"' not in sent               # and it went as text, not as a file
+
+
+async def test_pdf_without_a_text_layer_is_refused(proxy):
+    """A scan is a picture in a PDF wrapper - nothing to read, so nothing goes out."""
+    SEEN.clear()
+    response = await _call(proxy, "/v1/messages", json={
+        "model": "claude-opus-5",
+        "messages": [{"role": "user", "content": [
+            {"type": "document", "source": {
+                "type": "base64", "media_type": "application/pdf", "data": "bm90IGEgcGRm"}},
+        ]}],
+    })
     assert response.status_code == 501
-    assert response.json()["error"]["type"] == "blackbar_unredactable_attachment"
-    assert "application/pdf" in response.json()["error"]["message"]
-    assert "body" not in SEEN  # nothing reached the API
+    assert "no text layer" in response.json()["error"]["message"]
+    assert "body" not in SEEN
+
+
+async def test_images_can_be_allowed_knowingly(proxy):
+    """Opt-in, per the config - and the image still goes out unredacted."""
+    proxy.state.proxy.config.images = "send"
+    SEEN.clear()
+    response = await _call(proxy, "/v1/messages", json={
+        "model": "claude-opus-5",
+        "messages": [{"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBOR"}},
+        ]}],
+    })
+    proxy.state.proxy.config.images = "block"
+    assert response.status_code == 200
+    assert "iVBOR" in json.dumps(SEEN["body"])
 
 
 async def test_screenshot_is_refused(proxy):

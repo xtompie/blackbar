@@ -104,6 +104,12 @@ through the proxy.
 Tool results are the main leak source: that is where file contents and command output
 end up. Tool definitions and signed `thinking` blocks are left alone.
 
+A PDF would normally travel as base64 and be parsed on Anthropic's side, i.e. leave the
+machine whole. Instead blackbar opens it locally, extracts the text, redacts it like any
+other text and sends that - so the model reads the document, but never the real values in
+it. What it loses is the layout. A scan has no text layer to extract, so it counts as a
+picture and is refused.
+
 Everything runs locally. No classifier calls out to the cloud - that would just move the
 leak to a different vendor.
 
@@ -148,10 +154,8 @@ want it anyway, `blackbar attach --force` does it and says what you are taking o
   **orphans** in `blackbar stats`.
 - Only `/v1/messages` and `/v1/messages/count_tokens` are redacted. Any other POST to the
   API is refused with `blackbar_unhandled_endpoint` rather than forwarded unredacted.
-- PDFs and screenshots travel as base64 and are parsed on Anthropic's side, so there is
-  nothing for a local model to read and nothing to put back. Requests carrying them are
-  refused with `blackbar_unredactable_attachment`. Read the file as text instead, or use
-  `blackbar direct claude` when you mean to send it.
+- A screenshot cannot be read, so it cannot be redacted. Requests carrying one are
+  refused; allow them knowingly with `blackbar config set attachments.images send`.
 
 ## License
 

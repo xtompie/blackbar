@@ -20,7 +20,7 @@ from .detect import Redactor
 from .detect.gliner_layer import GlinerDetector
 from .detect.regexes import RegexDetector
 from .detect.rules import RulesDetector
-from .proxy import find_opaque_blocks, redact_request, restore_all, restore_response, session_key
+from .proxy import handle_attachments, redact_request, restore_all, restore_response, session_key
 from .sse import SSERewriter
 from .stats import RequestEvent, RequestLog, read_lines, summary
 from .vault import Vault
@@ -141,9 +141,9 @@ def _refuse_attachment(state: ProxyState, event: RequestEvent, kinds: list[str])
         {"error": {
             "type": "blackbar_unredactable_attachment",
             "message": (
-                f"blackbar cannot look inside an attachment ({listed}), so it cannot redact it "
-                f"and will not send it. Read the file as text instead, or run "
-                f"`blackbar direct claude` if you mean to send it as-is."
+                f"blackbar cannot read this attachment ({listed}), so it cannot redact it and "
+                f"will not send it. Allow it knowingly with "
+                f"`blackbar config set attachments.images send`, or run `blackbar direct claude`."
             ),
         }},
         status_code=501,
@@ -183,7 +183,8 @@ async def _handle_messages(state: ProxyState, request: Request) -> Response:
         session=session_key(body, request.headers.get("user-agent", "")),
     )
 
-    opaque = find_opaque_blocks(body)
+    # PDFs become text here; whatever is left is something we cannot read at all.
+    opaque = handle_attachments(body, state.config.pdf, state.config.images)
     if opaque:
         event.total_ms = (time.perf_counter() - started) * 1000
         return _refuse_attachment(state, event, opaque)
