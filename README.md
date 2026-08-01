@@ -35,6 +35,14 @@ blackbar claude
 That is all. It runs Claude Code exactly as usual, with the redaction in between - your
 arguments (`--resume`, `-c`, `-p`, anything) are passed through untouched.
 
+**What it cannot do: answer questions about the values it hid.** Ask *"is this email
+address valid?"*, *"what date of birth does this ID number encode?"* or *"sort these
+people alphabetically"* and the model is looking at `{{sensitive:person:1a33de}}`, not at
+the value - so the answer will be useless. Redaction is not selective and cannot be: the
+proxy has no way of knowing that this particular value is the subject of the question
+rather than incidental to it. When the value itself is the point, run that one session
+with `blackbar direct claude`.
+
 ## Turning it off
 
 There is no pause switch, on purpose: a global "off" that you can forget about is worse
@@ -158,6 +166,7 @@ want it anyway, `blackbar attach --force` does it and says what you are taking o
   gated to `api.anthropic.com`).
 - Redaction changes the prompt, so the first request after a rules change misses the
   prompt cache.
+- The model cannot reason about a value it never saw - see the warning above.
 - A model can mangle a placeholder in its reply - asking it to translate the text is the
   easy way to trigger this. The real value never left the machine, so the point still
   stands, but the reply comes back with `{{sensitive:...}}` in it. Those are counted as
