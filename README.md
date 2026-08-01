@@ -29,8 +29,10 @@ blackbar claude
 Claude Code behaves as usual. Your arguments (`--resume`, `-c`, `-p`) are passed through.
 
 **The model cannot answer questions about a value it never saw.** Ask *"is this ID number
-valid?"* and it is looking at `{{sensitive:pesel:1a33de}}`. For that one session, run
-`blackbar direct`.
+valid?"* and it is looking at `{{sensitive:pesel:1a33de}}`. It can still refer to it -
+blackbar tells it that placeholders are stable identifiers it may repeat, and turns them
+back into values in the reply - but it cannot reason about what is inside. For that one
+session, run `blackbar direct`.
 
 ## Commands
 

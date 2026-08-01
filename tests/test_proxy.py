@@ -107,3 +107,28 @@ def test_session_key_is_stable_for_the_same_prompt():
     assert session_key(body, "claude-cli/2.0") == session_key(body, "claude-cli/2.0")
     other = {"system": "You are Claude Code in /Users/neo/projects/other"}
     assert session_key(body, "claude-cli/2.0") != session_key(other, "claude-cli/2.0")
+
+
+async def test_the_model_is_told_what_placeholders_are(tmp_path):
+    """Otherwise it answers "I do not have that value" instead of echoing the
+    placeholder, which would come back as the value."""
+    from blackbar.proxy import PLACEHOLDER_NOTE
+
+    vault, redactor = _redactor(tmp_path)
+    body = {
+        "system": [{"type": "text", "text": "You are Claude Code.", "cache_control": {"type": "ephemeral"}}],
+        "messages": [{"role": "user", "content": "write to jan@example.com"}],
+    }
+    await redact_request(body, redactor)
+
+    assert body["system"][-1]["text"] == PLACEHOLDER_NOTE
+    # the cached prefix in front of it must be untouched
+    assert body["system"][0]["text"] == "You are Claude Code."
+    assert body["system"][0]["cache_control"] == {"type": "ephemeral"}
+
+
+async def test_no_note_when_nothing_was_masked(tmp_path):
+    vault, redactor = _redactor(tmp_path)
+    body = {"system": "You are Claude Code.", "messages": [{"role": "user", "content": "fix the typo"}]}
+    await redact_request(body, redactor)
+    assert body["system"] == "You are Claude Code."
