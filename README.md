@@ -42,7 +42,7 @@ blackbar start               # start the daemon
 blackbar stop                # stop it, dropping open connections
 blackbar restart             # both, with an empty vault afterwards
 blackbar status              # what is covered and what has gone through
-blackbar mode                # which of the three modes is active
+blackbar mode                # per command or always, and what holds it
 
 blackbar watch               # follow the traffic live
 blackbar watch --reveal      # ⚠ also print the values that were replaced
