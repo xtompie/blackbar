@@ -145,8 +145,10 @@ proxy.
 - It can also mangle a placeholder — asking it to translate the text does it reliably.
   The value stayed home, but the reply comes back with `{{sensitive:...}}` in it. Counted
   as **orphans** in `blackbar stats`.
-- Restarting the daemon empties the vault, so open sessions lose the values from their
-  earlier history.
+- Restarting the daemon empties the vault. Open sessions keep working - Claude Code
+  holds the real history and resends it, so it just gets fresh placeholders - but the
+  prompt cache is lost. A placeholder that already reached a file on disk stays
+  unresolvable.
 - Changing your rules changes the prompt, so the next request misses the prompt cache.
 - Remote Control does not work behind a proxy (Claude Code gates it to
   `api.anthropic.com` since v2.1.196).

@@ -111,7 +111,7 @@ def restart() -> None:
     config = _config()
     daemon.stop(config)
     if daemon.start_background(config):
-        print(f"{GREEN}▮{OFF} daemon restarted, vault empty (old placeholders will not resolve)")
+        print(f"{GREEN}▮{OFF} daemon restarted, vault empty - sessions keep working, prompt cache does not")
     else:
         _die("restart failed")
 
@@ -520,8 +520,8 @@ def vault_clear(yes: bool = typer.Option(False, "--yes", "-y")) -> None:
     config = _config()
     _require_daemon(config)
     if not yes:
-        print(f"{YELLOW}⚠ Open sessions lose restoration for their earlier history "
-              f"and the prompt cache is gone.{OFF}")
+        print(f"{YELLOW}⚠ The prompt cache is gone. Any placeholder already written to "
+              f"a file stays unresolvable.{OFF}")
         if not typer.confirm("Continue?", default=False):
             raise typer.Exit(1)
     daemon.admin_post(config, "vault/clear")
@@ -810,7 +810,7 @@ def update(yes: bool = typer.Option(False, "--yes", "-y")) -> None:
         print(f"{DIM}restarting the daemon so it runs the new code{OFF}")
         daemon.stop(config)
         daemon.start_background(config)
-        print(f"{GREEN}▮{OFF} daemon restarted, vault empty")
+        print(f"{GREEN}▮{OFF} daemon restarted, vault empty - prompt cache starts over")
 
 
 def _find_repo(config) -> Path | None:
