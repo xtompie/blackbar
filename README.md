@@ -114,22 +114,32 @@ refused rather than forwarded unredacted.
 
 ## The log
 
-One line per request, in `~/.local/state/blackbar/requests.log`:
+One line per exchange, in `~/.local/state/blackbar/requests.log`. `sent_*` is what went
+to the API, `back_*` is what came out of the reply:
 
 ```
-ts=1785589854.174 id=1 session=c87238 model=claude-opus-5 stream=0 status=401
-chars=140 masked=2 restored=0 orphans=0 detect_ms=244.2 total_ms=598.5
-kinds=email:1,person:1 layers=gliner:1,regex:1 keys=person:2235e5,email:95bc08
-cache_read=0 input_tokens=0
+ts=1785590116.888 id=1 session=c87238 model=claude-opus-5 stream=0 status=401
+sent_chars=134 sent_masked=2 sent_kinds=email:1,person:1 sent_layers=gliner:1,regex:1
+sent_keys=person:a93d8e,email:0e02ac back_restored=0 back_orphans=0
+detect_ms=3620.5 total_ms=4265.6 cache_read=0 input_tokens=0
 ```
 
-`chars` is how much text was scanned, which is what `detect_ms` was spent on. A refused
-request adds `refused=unhandled_endpoint` or `refused=attachment` at the end.
+`back_restored=0` is normal - it means the model did not repeat any placeholder in its
+answer. The number that matters is `back_orphans`: anything above zero is a placeholder
+that came back mangled and could not be turned into a value again. A refused request
+carries `refused=unhandled_endpoint` or `refused=attachment` instead.
 
+`blackbar watch` reads the same file and drops the zeros:
 
-It records what happened, never what was in it — the keys are hashes. `watch --reveal`
-resolves them against the running daemon; it and `vault show` are the only commands that
-print real data.
+```
+15:15:16 #1 → email:1  person:1 3620ms scanning 134 chars
+15:15:21 #2 → nothing to mask 2988ms scanning 114 chars
+15:15:24 #3 refused: unhandled_endpoint
+```
+
+The file records what happened, never what was in it — the keys are hashes.
+`watch --reveal` resolves them against the running daemon; it and `vault show` are the
+only commands that print real data.
 
 An empty log while a Claude Code window is running means that window is bypassing the
 proxy.

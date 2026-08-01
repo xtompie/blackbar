@@ -260,18 +260,20 @@ def last(n: int = typer.Option(5, "-n", help="how many recent requests")) -> Non
     config = _config()
     for entry in stats_mod.read_lines(config.requests_path, limit=n):
         stamp = time.strftime("%H:%M:%S", time.localtime(entry["ts"]))
-        flags = []
-        if entry["orphans"]:
-            flags.append(f"{RED}orphans:{entry['orphans']}{OFF}")
+        if entry.get("refused"):
+            print(f"{stamp} {DIM}#{entry['id']}{OFF} {RED}refused: {entry['refused']}{OFF}")
+            continue
         print(
-            f"{stamp} {DIM}#{entry['id']}{OFF} "
-            f"{DIM}{entry['model']}{OFF} session:{entry['session']} "
-            f"masked:{entry['masked']} restored:{entry['restored']} "
-            f"{DIM}+{entry['detect_ms']:.0f}ms detect / {entry['total_ms']:.0f}ms total{OFF} "
-            + " ".join(flags)
+            f"{stamp} {DIM}#{entry['id']} {entry['model']} session:{entry['session']}{OFF}"
         )
-        if entry["kinds"]:
-            print(f"    {DIM}{_kinds(entry['kinds'])}{OFF}")
+        print(f"    {DIM}sent{OFF}  {entry['masked']} masked "
+              f"{DIM}({_kinds(entry['kinds']) or 'nothing found'}) "
+              f"in {entry['chars']} chars, {entry['detect_ms']:.0f}ms{OFF}")
+        back = f"{entry['restored']} restored"
+        if entry["orphans"]:
+            back += f", {RED}{entry['orphans']} NOT restored{OFF}"
+        print(f"    {DIM}back{OFF}  {back} {DIM}(status {entry['status']}, "
+              f"{entry['total_ms']:.0f}ms total){OFF}")
 
 
 @app.command()
@@ -883,15 +885,25 @@ def _duration(seconds: float) -> str:
 
 
 def _format_event(event: dict) -> str:
+    """One line per exchange. A zero says nothing, so zeros are left out - except
+    orphans, where a zero is the good news and any other number is the alarm."""
     stamp = time.strftime("%H:%M:%S", time.localtime(event["ts"]))
+    parts = [stamp, f"{DIM}#{event['id']}{OFF}"]
+
+    if event.get("refused"):
+        return f"{stamp} {DIM}#{event['id']}{OFF} {RED}refused: {event['refused']}{OFF}"
+
     kinds = _kinds(event.get("kinds") or {})
-    orphans = event.get("orphans") or 0
-    tail = f" {RED}orphans:{orphans}{OFF}" if orphans else ""
-    return (
-        f"{stamp} {DIM}#{event['id']}{OFF} "
-        f"{kinds or DIM + 'none' + OFF} "
-        f"restored:{event['restored']} {DIM}+{event['detect_ms']:.0f}ms{OFF}{tail}"
-    )
+    parts.append(f"{DIM}→{OFF} {kinds}" if kinds else f"{DIM}→ nothing to mask{OFF}")
+    if event.get("restored"):
+        parts.append(f"{DIM}←{OFF} {event['restored']} restored")
+    if event.get("orphans"):
+        parts.append(f"{RED}← {event['orphans']} NOT restored{OFF}")
+
+    detect = event.get("detect_ms") or 0
+    if detect >= 1:
+        parts.append(f"{DIM}{detect:.0f}ms scanning {event.get('chars', 0)} chars{OFF}")
+    return " ".join(parts)
 
 
 

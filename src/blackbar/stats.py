@@ -1,4 +1,8 @@
-"""Request log: one line per request, appended to a plain text file.
+"""Request log: one line per exchange, appended to a plain text file.
+
+One line covers both directions, so the fields say which one they mean: `sent_*` is what
+went to the API, `back_*` is what came out of the reply. Without that, `restored=0` reads
+like a failure, when it usually just means the model did not repeat any placeholder.
 
 `~/.local/state/blackbar/requests.log` in logfmt, so `tail -f` on it works without
 blackbar in the loop at all. `watch`, `last` and `stats` all read this one file - there
@@ -52,17 +56,17 @@ class RequestEvent:
             ("model", self.model or "-"),
             ("stream", int(self.streaming)),
             ("status", self.status if self.status is not None else "-"),
-            # chars is what detect_ms is spent on - without it a slow request looks
-            # like a mystery instead of a big file
-            ("chars", self.chars),
-            ("masked", self.masked),
-            ("restored", self.restored),
-            ("orphans", self.orphans),
+            # sent_chars is what detect_ms was spent on - without it a slow request
+            # looks like a mystery instead of a big file
+            ("sent_chars", self.chars),
+            ("sent_masked", self.masked),
+            ("sent_kinds", _counts(self.kinds)),
+            ("sent_layers", _counts(self.layers)),
+            ("sent_keys", ",".join(f"{kind}:{key}" for kind, key in self.keys) or "-"),
+            ("back_restored", self.restored),
+            ("back_orphans", self.orphans),
             ("detect_ms", f"{self.detect_ms:.1f}"),
             ("total_ms", f"{self.total_ms:.1f}"),
-            ("kinds", _counts(self.kinds)),
-            ("layers", _counts(self.layers)),
-            ("keys", ",".join(f"{kind}:{key}" for kind, key in self.keys) or "-"),
             ("cache_read", self.usage.get("cache_read_input_tokens") or 0),
             ("input_tokens", self.usage.get("input_tokens") or 0),
         ]
@@ -91,17 +95,17 @@ def parse_line(line: str) -> dict | None:
         "model": fields.get("model", "-"),
         "streaming": fields.get("stream") == "1",
         "status": _int(fields.get("status")),
-        "chars": _int(fields.get("chars")) or 0,
-        "masked": _int(fields.get("masked")) or 0,
-        "restored": _int(fields.get("restored")) or 0,
-        "orphans": _int(fields.get("orphans")) or 0,
+        "chars": _int(fields.get("sent_chars")) or 0,
+        "masked": _int(fields.get("sent_masked")) or 0,
+        "restored": _int(fields.get("back_restored")) or 0,
+        "orphans": _int(fields.get("back_orphans")) or 0,
         "detect_ms": _float(fields.get("detect_ms")),
         "total_ms": _float(fields.get("total_ms")),
-        "kinds": _pairs(fields.get("kinds")),
-        "layers": _pairs(fields.get("layers")),
+        "kinds": _pairs(fields.get("sent_kinds")),
+        "layers": _pairs(fields.get("sent_layers")),
         "keys": [
             tuple(item.split(":", 1))
-            for item in (fields.get("keys", "-") or "-").split(",")
+            for item in (fields.get("sent_keys", "-") or "-").split(",")
             if item and item != "-" and ":" in item
         ],
         "refused": None if fields.get("refused", "-") == "-" else fields.get("refused"),
