@@ -70,16 +70,17 @@ blackbar update              # pull and reinstall
 blackbar uninstall
 ```
 
-## Modes
+## Two ways to run it
 
-| mode | what goes through the proxy | what it touches |
-|---|---|---|
-| **manual** *(default)* | `blackbar claude` | nothing outside `~/.config/blackbar/` |
-| **service** | `blackbar claude`, with the daemon under launchd/systemd | a service file |
-| **attached** | every `claude` | also `~/.claude/settings.json` |
+**Per command (default).** Only `blackbar claude` goes through the proxy. A plain `claude`
+connects straight to Anthropic, exactly as before. Nothing outside `~/.config/blackbar/`
+is touched.
 
-`attach` asks for the service first: with the proxy wired into the settings, a dead daemon
-means `claude` will not start at all. `blackbar attach --force` skips that.
+**Always.** `blackbar attach` writes the proxy address into `~/.claude/settings.json`, so
+every `claude` goes through it — including the ones you start out of habit. Since nothing
+would then check whether the daemon is alive, `attach` requires `blackbar service install`
+first; a dead daemon means `claude` will not start at all. Use `blackbar direct` to bypass
+it once, `blackbar detach` to go back.
 
 There is no pause switch. An "off" you can forget about is worse than no protection.
 
