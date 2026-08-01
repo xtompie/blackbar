@@ -142,8 +142,8 @@ def _refuse_attachment(state: ProxyState, event: RequestEvent, kinds: list[str])
             "type": "blackbar_unredactable_attachment",
             "message": (
                 f"blackbar cannot read this attachment ({listed}), so it cannot redact it and "
-                f"will not send it. Allow it knowingly with "
-                f"`blackbar config set attachments.images send`, or run `blackbar direct claude`."
+                f"will not send it. Add the type to attachments.allow in the config to send it "
+                f"as-is and unredacted, or run `blackbar direct claude`."
             ),
         }},
         status_code=501,
@@ -184,7 +184,7 @@ async def _handle_messages(state: ProxyState, request: Request) -> Response:
     )
 
     # PDFs become text here; whatever is left is something we cannot read at all.
-    opaque = handle_attachments(body, state.config.pdf, state.config.images)
+    opaque = handle_attachments(body, state.config.allow)
     if opaque:
         event.total_ms = (time.perf_counter() - started) * 1000
         return _refuse_attachment(state, event, opaque)
@@ -336,12 +336,21 @@ def _admin_health(state: ProxyState):
 
 def _admin_status(state: ProxyState):
     async def handler(request: Request) -> Response:
-        recent = summary(read_lines(state.config.requests_path, since=time.time() - 3600))
+        from .attachments import supported_types
+
+        entries = read_lines(state.config.requests_path, since=time.time() - 3600)
+        recent = summary(entries)
+        refusals: dict[str, int] = {}
+        for entry in entries:
+            if entry.get("refused"):
+                refusals[entry["refused"]] = refusals.get(entry["refused"], 0) + 1
+        last_entry = read_lines(state.config.requests_path, limit=1)
+        since_start = read_lines(state.config.requests_path, since=state.started_at)
         return JSONResponse({
             "version": __version__,
             "uptime_s": round(time.time() - state.started_at, 1),
             "port": state.config.port,
-            "requests": state.request_count,
+            "requests": len(since_start),
             "model": state.config.model,
             "model_loaded": bool(state.gliner and state.gliner.loaded),
             "model_error": state.gliner.error if state.gliner else None,
@@ -349,7 +358,17 @@ def _admin_status(state: ProxyState):
             "rules_count": state.rules.count,
             "rules_error": state.rules.error,
             "vault": state.vault.stats(),
-            "sessions_last_hour": recent["sessions"],
+            "sessions_last_hour": [s for s in recent["sessions"] if s["session"] not in ("-", None)],
+            "requests_last_hour": recent["totals"]["requests"],
+            "masked_last_hour": recent["totals"]["masked"],
+            "orphans_last_hour": recent["totals"]["orphans"],
+            "refusals_last_hour": refusals,
+            "last_request_ts": last_entry[0]["ts"] if last_entry else None,
+            "started_ts": state.started_at,
+            "attachments_read": supported_types(),
+            "attachments_allowed": state.config.allow,
+            "endpoints": sorted(REDACTED_PATHS),
+            "log_path": str(state.config.requests_path),
             "upstream": state.config.upstream,
         })
     return handler

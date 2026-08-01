@@ -227,13 +227,13 @@ async def test_pdf_without_a_text_layer_is_refused(proxy):
         ]}],
     })
     assert response.status_code == 501
-    assert "no text layer" in response.json()["error"]["message"]
+    assert "no text to read" in response.json()["error"]["message"]
     assert "body" not in SEEN
 
 
-async def test_images_can_be_allowed_knowingly(proxy):
-    """Opt-in, per the config - and the image still goes out unredacted."""
-    proxy.state.proxy.config.images = "send"
+async def test_a_type_can_be_allowed_knowingly(proxy):
+    """Opt-in, per the config - and it still goes out unredacted."""
+    proxy.state.proxy.config.allow = ["image/png"]
     SEEN.clear()
     response = await _call(proxy, "/v1/messages", json={
         "model": "claude-opus-5",
@@ -241,7 +241,7 @@ async def test_images_can_be_allowed_knowingly(proxy):
             {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBOR"}},
         ]}],
     })
-    proxy.state.proxy.config.images = "block"
+    proxy.state.proxy.config.allow = []
     assert response.status_code == 200
     assert "iVBOR" in json.dumps(SEEN["body"])
 
@@ -268,3 +268,38 @@ async def test_refusal_is_written_to_the_log(proxy):
     latest = read_lines(proxy.state.proxy.config.requests_path, limit=1)[0]
     assert latest["refused"] == "attachment"
     assert latest["status"] == 501
+
+
+async def test_a_csv_attachment_is_read_and_redacted(proxy):
+    """Any type we can turn into text follows the same path as a PDF."""
+    import base64
+
+    csv = base64.b64encode(b"name,email\nJan Kowalski,jan@example.com\n").decode()
+    SEEN.clear()
+    response = await _call(proxy, "/v1/messages", json={
+        "model": "claude-opus-5",
+        "messages": [{"role": "user", "content": [
+            {"type": "document", "source": {
+                "type": "base64", "media_type": "text/csv", "data": csv}},
+        ]}],
+    })
+    assert response.status_code == 200
+    sent = json.dumps(SEEN["body"])
+    assert "jan@example.com" not in sent
+    assert "{{sensitive:email:" in sent
+    assert "name,email" in sent
+
+
+async def test_status_reports_what_it_covers(proxy):
+    data = await _admin(proxy, "/_admin/status")
+    assert "PDF" in data["attachments_read"]
+    assert any(item.startswith("text/*") for item in data["attachments_read"])
+    assert data["attachments_allowed"] == []
+    assert data["endpoints"] == ["/v1/messages", "/v1/messages/count_tokens"]
+    assert data["started_ts"] > 0
+
+
+async def _admin(app, path):
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://proxy") as client:
+        response = await client.get(path)
+    return response.json()

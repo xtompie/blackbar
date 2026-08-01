@@ -117,7 +117,7 @@ def restart() -> None:
 
 @app.command()
 def status() -> None:
-    """Daemon state and actual traffic."""
+    """What is running, what it covers, and what it has actually done."""
     config = _config()
     if not daemon.is_running(config):
         print(f"{RED}▮{OFF} daemon not running   {DIM}blackbar start{OFF}")
@@ -125,32 +125,57 @@ def status() -> None:
     data = daemon.admin_get(config, "status")
     mode_name, mode_detail = _mode(config)
 
-    print(f"{BOLD}blackbar {data['version']}{OFF}  {GREEN}active{OFF}  {config.base_url}")
+    print(f"{BOLD}blackbar {data['version']}{OFF}  {GREEN}running{OFF}  {config.base_url}")
     print(f"  mode        {mode_name} {DIM}{mode_detail}{OFF}")
-    print(f"  uptime      {_duration(data['uptime_s'])}")
-    print(f"  layers      {', '.join(data['layers'])}")
+    started = time.strftime("%Y-%m-%d %H:%M", time.localtime(data["started_ts"]))
+    print(f"  uptime      {_duration(data['uptime_s'])} {DIM}(since {started}){OFF}")
 
+    print(f"\n{BOLD}redaction{OFF}")
+    print(f"  layers      {', '.join(data['layers'])}")
     if data.get("model_error"):
         print(f"  model       {RED}{data['model']} - {data['model_error']}{OFF}")
     else:
         loaded = "loaded" if data["model_loaded"] else "loading..."
         print(f"  model       {data['model']} {DIM}({loaded}){OFF}")
-
     rules_line = f"{data['rules_count']} custom rule(s)"
     if data.get("rules_error"):
         rules_line += f" {RED}({data['rules_error']}){OFF}"
     print(f"  rules       {rules_line}")
+    print(f"  endpoints   {', '.join(data['endpoints'])} {DIM}(anything else is refused){OFF}")
+
+    print(f"\n{BOLD}attachments{OFF}")
+    print(f"  read        {', '.join(data['attachments_read'])}"
+          f"  {DIM}→ extracted, redacted, sent as text{OFF}")
+    allowed = data.get("attachments_allowed") or []
+    if allowed:
+        print(f"  {YELLOW}sent as-is  {', '.join(allowed)}  ⚠ not redacted{OFF}")
+    else:
+        print(f"  sent as-is  {DIM}none - everything unreadable is refused{OFF}")
+
+    print(f"\n{BOLD}traffic{OFF}")
+    last_ts = data.get("last_request_ts")
+    when = f"{_duration(time.time() - last_ts)} ago" if last_ts else "never"
+    print(f"  requests    {data['requests']} since start   {DIM}last: {when}{OFF}")
+    print(f"  last hour   {data['requests_last_hour']} requests, "
+          f"{data['masked_last_hour']} values masked")
+    orphans = data.get("orphans_last_hour") or 0
+    if orphans:
+        print(f"  {RED}orphans     {orphans} in the last hour - a placeholder came back mangled{OFF}")
+    refusals = data.get("refusals_last_hour") or {}
+    if refusals:
+        print(f"  {YELLOW}refused     {_kinds(refusals)}{OFF}")
 
     vault = data.get("vault") or {}
     print(f"  vault       {sum(vault.values())} value(s) {DIM}{_kinds(vault)}{OFF}")
-    print(f"  requests    {data['requests']} since start")
 
     sessions = data.get("sessions_last_hour") or []
     if sessions:
-        print(f"  sessions/1h {len(sessions)}")
+        print(f"  sessions    {len(sessions)} in the last hour")
         for entry in sessions[:5]:
             age = _duration(time.time() - entry["last_ts"])
             print(f"    {DIM}{entry['session']}  {entry['requests']} req, last {age} ago{OFF}")
+
+    print(f"\n{DIM}log: {data['log_path']}{OFF}")
 
 
 @app.command()

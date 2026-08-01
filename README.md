@@ -104,11 +104,20 @@ through the proxy.
 Tool results are the main leak source: that is where file contents and command output
 end up. Tool definitions and signed `thinking` blocks are left alone.
 
-A PDF would normally travel as base64 and be parsed on Anthropic's side, i.e. leave the
-machine whole. Instead blackbar opens it locally, extracts the text, redacts it like any
-other text and sends that - so the model reads the document, but never the real values in
-it. What it loses is the layout. A scan has no text layer to extract, so it counts as a
-picture and is refused.
+**Attachments** would normally travel as base64 and be parsed on Anthropic's side, i.e.
+leave the machine whole. Instead blackbar opens them locally: PDF, Word, and anything
+textual (txt, csv, md, html, JSON, XML, YAML) are turned into text, redacted like any
+other text, and sent as text. The model reads the document; it never reads the real
+values in it. What it loses is the layout.
+
+Whatever cannot be read - a screenshot, a scanned PDF with no text layer - is refused.
+To send such a file anyway, name its type in the config; it then travels exactly as it
+is, unredacted, and `blackbar status` says so in yellow:
+
+```toml
+[attachments]
+allow = ["image/png"]
+```
 
 Everything runs locally. No classifier calls out to the cloud - that would just move the
 leak to a different vendor.
@@ -155,7 +164,7 @@ want it anyway, `blackbar attach --force` does it and says what you are taking o
 - Only `/v1/messages` and `/v1/messages/count_tokens` are redacted. Any other POST to the
   API is refused with `blackbar_unhandled_endpoint` rather than forwarded unredacted.
 - A screenshot cannot be read, so it cannot be redacted. Requests carrying one are
-  refused; allow them knowingly with `blackbar config set attachments.images send`.
+  refused unless the type is listed in `attachments.allow`.
 
 ## License
 

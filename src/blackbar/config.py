@@ -27,13 +27,12 @@ threshold = 0.5
 layers = ["rules", "regex", "gliner"]
 
 [attachments]
-# pdf:    extract = read the text locally, redact it, send it as text
-#         block   = refuse the request
-#         send    = pass the file through untouched (it is not redacted!)
-pdf = "extract"
-# images: block | send. There is nothing to read in a screenshot, so "send" means
-#         sending it exactly as it is, unredacted.
-images = "block"
+# Files we can turn into text (PDF, text/*, JSON, XML, docx) are read locally, redacted
+# and sent as text. Anything else is refused.
+#
+# Media types listed here are sent AS IS instead - not read, not redacted. Use it
+# knowingly, e.g. allow = ["image/png"] to let screenshots through.
+allow = []
 
 [upstream]
 url = "https://api.anthropic.com"
@@ -64,8 +63,7 @@ class Config:
     threshold: float = 0.5
     layers: list[str] = field(default_factory=lambda: ["rules", "regex", "gliner"])
     upstream: str = "https://api.anthropic.com"
-    pdf: str = "extract"
-    images: str = "block"
+    allow: list[str] = field(default_factory=list)
     path: Path = field(default_factory=lambda: config_dir() / "config.toml")
 
     @property
@@ -116,8 +114,7 @@ def load(path: Path | None = None) -> Config:
     config.layers = [str(layer) for layer in detection.get("layers", config.layers)]
 
     attachments = data.get("attachments") or {}
-    config.pdf = str(attachments.get("pdf", config.pdf))
-    config.images = str(attachments.get("images", config.images))
+    config.allow = [str(item) for item in attachments.get("allow", config.allow)]
 
     upstream = data.get("upstream") or {}
     config.upstream = str(upstream.get("url", config.upstream)).rstrip("/")

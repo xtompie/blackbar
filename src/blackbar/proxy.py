@@ -98,15 +98,14 @@ async def _scan_json(value, scan):
     return value
 
 
-# Attachments are base64, not text. A PDF can be opened here and turned into text that
-# the normal redaction path handles; a screenshot cannot be read at all.
-def handle_attachments(body: dict, pdf_mode: str, image_mode: str) -> list[str]:
-    """Converts PDFs to text in place. Returns what is left that we cannot redact.
+def handle_attachments(body: dict, allowed: list[str]) -> list[str]:
+    """Extracts every attachment we can read into text, in place.
 
-    pdf_mode:   extract | block | send
-    image_mode: block | send
+    Returns the media types we could not read and that are not explicitly allowed -
+    the caller refuses the request when that list is not empty. Allowed types are left
+    exactly as they are, which means they travel unredacted.
     """
-    from .pdf import extract_text
+    from .attachments import extract, reader_for
 
     blocked: list[str] = []
 
@@ -126,20 +125,19 @@ def handle_attachments(body: dict, pdf_mode: str, image_mode: str) -> list[str]:
 
             source = block.get("source") or {}
             media = str(source.get("media_type") or kind)
-            mode = pdf_mode if kind == "document" else image_mode
-
-            if mode == "send":
+            if media in allowed:
                 continue
-            if kind == "document" and mode == "extract" and source.get("type") == "base64":
-                text = extract_text(str(source.get("data") or ""))
-                if text is not None:
-                    # Replaced in place, so the text goes through the same scan as
-                    # everything else in the request.
-                    content[index] = {"type": "text", "text": text}
-                    continue
-                # No text layer: this is a scan, i.e. a picture in a PDF wrapper.
-                media = f"{media} (no text layer)"
-            blocked.append(media)
+
+            text = None
+            if source.get("type") == "base64":
+                text = extract(media, str(source.get("data") or ""))
+            if text is not None:
+                # Replaced in place, so it goes through the same scan as the rest.
+                content[index] = {"type": "text", "text": text}
+                continue
+
+            # Readable type but nothing came out of it: a scan, i.e. a picture.
+            blocked.append(f"{media} (no text to read)" if reader_for(media) else media)
 
     for message in body.get("messages") or []:
         if isinstance(message, dict):
