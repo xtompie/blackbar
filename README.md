@@ -142,6 +142,17 @@ proxy.
 ~/.local/state/blackbar/        requests.log, daemon.log
 ```
 
+## Speed
+
+Scanning costs about 285 ms per 1000 characters, so a large `tool_result` is slow: a
+100 KB file takes half a minute the first time it appears. Repeats are free - the result
+is cached per block - but `--resume` and anything that restarts the daemon start from an
+empty cache and pay for the whole history at once.
+
+This is deliberate. Everything is scanned, with no shortcuts for text that "looks like
+code", because a shortcut is a hole with a nicer name. Blackbar being slow, or failing
+outright, is a far better outcome than a name going out unmasked.
+
 ## Limitations
 
 - The model cannot reason about values it never saw.

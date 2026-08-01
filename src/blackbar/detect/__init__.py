@@ -1,4 +1,9 @@
-"""Detection layers combined into a single pass over the text."""
+"""Detection layers combined into a single pass over the text.
+
+Everything is scanned. There is no size limit, no sampling and no heuristic for skipping
+text that looks like code - each of those would be a hole with a nicer name. Being slow,
+or failing, is an acceptable outcome here; sending a name out unmasked is not.
+"""
 
 from __future__ import annotations
 
