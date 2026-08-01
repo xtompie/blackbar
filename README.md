@@ -78,9 +78,10 @@ is written to disk, so restarting the daemon starts from scratch.
 The daemon appends one line per request to `~/.local/state/blackbar/requests.log`:
 
 ```
-ts=1785529390.169 id=1 provider=anthropic session=c87238 model=claude-opus-5 stream=0
-status=401 masked=2 restored=0 orphans=0 detect_ms=1.4 total_ms=5528.8
-kinds=aws_key:1,email:1 layers=regex:2 keys=email:e09c6b,aws_key:8b4c78 cache_read=0
+ts=1785571185.815 id=1 provider=anthropic session=c87238 model=claude-opus-5 stream=0
+status=200 masked=2 restored=2 orphans=0 detect_ms=500.5 total_ms=833.9
+kinds=email:1,person:1 layers=gliner:1,regex:1 keys=person:28674a,email:18807e
+refused=- cache_read=0 input_tokens=0
 ```
 
 That is the whole mechanism - a text file. `tail -f`, `grep`, anything you already use
