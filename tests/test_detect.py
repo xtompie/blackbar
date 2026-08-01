@@ -111,3 +111,34 @@ def test_password_hashes_are_secrets_but_git_hashes_are_not():
     # a commit sha and a lockfile checksum must survive untouched
     assert kinds("fix in 9bf1add4c3e2f1a0b7d6c5e4f3a2b1c0d9e8f7a6") == set()
     assert kinds('"integrity": "sha512-abc123def456ghi789jkl012mno345pqr678stu"') == set()
+
+
+def test_digits_inside_urls_and_versions_are_not_data():
+    """Every false positive found on a real repository had the same cause: biting a
+    chunk out of a longer string."""
+    assert kinds("https://support.grammarly.com/hc/en-us/articles/30916398193037-Intro") == set()
+    assert kinds("Chrome/120.0.0.0 Safari/537.36") == set()
+    assert kinds("set('repository', 'git@github.com:xtompie/aizen.git')") == set()
+    assert kinds("20260425.@id-a3f9xk.@p2.@auth.@feature.termsy.md") == set()
+
+
+def test_css_colours_are_not_phone_numbers():
+    """`--color-l0: 255 255 255` has exactly the shape of a Polish phone number, and a
+    stylesheet has hundreds of them."""
+    assert kinds("--color-l0: 255 255 255;") == set()
+    assert kinds("background: rgb(255 255 255 / 0.5);") == set()
+    assert kinds("error_page 502 503 504 /maintenance.html;") == set()
+
+
+def test_phone_numbers_are_still_caught():
+    assert "phone" in kinds("zadzwon +48 501 234 567")
+    assert "phone" in kinds("tel. 501 234 567")
+    assert "phone" in kinds("numer 501-234-567")
+    assert "phone" in kinds("kom: 501234567")
+
+
+def test_tax_id_needs_the_word_next_to_it():
+    """Ten digits on their own are just a number - 2147483646 is MAX_INT, and it passes
+    the NIP checksum."""
+    assert kinds("MAX_SAFE = 2147483646") == set()
+    assert "nip" in kinds("NIP: 6472477787")
