@@ -142,13 +142,19 @@ blackbar rules add "Acme Ltd" --kind company    # add your own
 blackbar update
 ```
 
-Pulls the clone it was installed from, shows what changed, reinstalls and restarts the
-daemon. `git pull` alone is not enough unless the install was editable: `uv tool install`
-copies the package, so the repository would move on while the command stayed behind.
+Pulls, shows which commits arrived, and restarts the daemon so it runs the new code.
 
-The clone has to still be there. `blackbar update` finds it from
-`~/.config/blackbar/install-report.md`, or from its own location when it runs from the
-repository; if the directory is gone it says so instead of pretending.
+Everything lives in fixed places, so nothing has to be looked up:
+
+```
+~/.local/share/blackbar/repo    the clone `update` pulls
+~/.local/share/blackbar/venv    the environment it runs from
+~/.config/blackbar/             config.toml, rules.yaml
+~/.local/state/blackbar/        requests.log, daemon.log
+```
+
+The install is editable, so a pull is already enough for code; `update` reinstalls on top
+of it anyway, which is what picks up new dependencies.
 
 ## Modes
 

@@ -54,6 +54,15 @@ def data_dir() -> Path:
     return Path(base) / APP
 
 
+def repo_dir() -> Path:
+    """Where the clone lives. Fixed, so `blackbar update` never has to look for it."""
+    return data_dir() / "repo"
+
+
+def venv_dir() -> Path:
+    return data_dir() / "venv"
+
+
 @dataclass
 class Config:
     host: str = "127.0.0.1"

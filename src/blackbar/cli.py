@@ -774,8 +774,8 @@ def update(yes: bool = typer.Option(False, "--yes", "-y")) -> None:
     config = _config()
     repo = _find_repo(config)
     if repo is None:
-        _die("cannot find the clone this was installed from - pull it by hand, then "
-             "reinstall (see INSTALL.md step 2)")
+        _die(f"no clone at {config_mod.repo_dir()} - reinstall with INSTALL.md, "
+             f"which puts it there")
     print(f"{DIM}repository: {repo}{OFF}")
 
     before = _git(repo, "rev-parse", "--short", "HEAD")
@@ -798,8 +798,9 @@ def update(yes: bool = typer.Option(False, "--yes", "-y")) -> None:
     if editable:
         print(f"{DIM}editable install - the code is already live{OFF}")
     else:
-        command = ["uv", "tool", "install", "--force", "."] if _has_uv() else [
-            sys.executable, "-m", "pip", "install", "--quiet", "."]
+        pip = config_mod.venv_dir() / "bin" / "pip"
+        command = ([str(pip), "install", "--quiet", "-e", "."] if pip.exists()
+                   else [sys.executable, "-m", "pip", "install", "--quiet", "-e", "."])
         result = subprocess.run(command, cwd=str(repo), capture_output=True, text=True)
         if result.returncode != 0:
             _die(result.stderr.strip() or "reinstall failed")
@@ -813,15 +814,10 @@ def update(yes: bool = typer.Option(False, "--yes", "-y")) -> None:
 
 
 def _find_repo(config) -> Path | None:
-    """The clone we were installed from: recorded at install time, or right here."""
-    report = config.install_report_path
-    if report.exists():
-        for line in report.read_text(encoding="utf-8").splitlines():
-            if "repo" in line.lower() or "clone" in line.lower():
-                for word in line.replace("`", " ").split():
-                    candidate = Path(word.strip("*-: ")).expanduser()
-                    if (candidate / ".git").exists():
-                        return candidate
+    """The clone lives in one place. Running from a working copy also counts."""
+    standard = config_mod.repo_dir()
+    if (standard / ".git").exists():
+        return standard
     here = Path(__file__).resolve().parents[2]
     return here if (here / ".git").exists() else None
 
@@ -832,11 +828,8 @@ def _git(repo: Path, *args: str) -> str:
 
 
 def _is_editable() -> bool:
-    return (Path(__file__).resolve().parents[2] / "pyproject.toml").exists()
-
-
-def _has_uv() -> bool:
-    return subprocess.run(["which", "uv"], capture_output=True).returncode == 0
+    """An editable install runs straight from the clone, so a pull is already enough."""
+    return (Path(__file__).resolve().parents[2] / ".git").exists()
 
 
 @app.command()

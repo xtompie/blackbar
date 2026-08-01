@@ -13,6 +13,8 @@ These four have to stay exactly as they are:
 |---|---|---|
 | command name | `blackbar` | docs, the service and the settings entry all refer to it by name |
 | config directory | `~/.config/blackbar/` | the daemon, the CLI and the uninstaller all look there |
+| clone directory | `~/.local/share/blackbar/repo` | `blackbar update` pulls exactly this path |
+| environment | `~/.local/share/blackbar/venv` | `blackbar update` reinstalls into exactly this one |
 | port | from `config.toml`, default `8555` | launcher, service and settings entry must all point at the same one |
 | placeholder format | `{{sensitive:<kind>:<key>}}` | baked-in conversation history stops restoring if this changes |
 
@@ -21,24 +23,19 @@ that are already running. Leave them alone even when something else looks cleane
 
 ## You may decide
 
-- package manager: `uv` (preferred), `pipx`, plain `venv` - install what is missing
-- where the environment lives, as long as `blackbar` ends up on the user's `PATH`
+- how the virtual environment gets created (`uv venv`, `python -m venv`) - only the path is fixed
 - the model variant (see step 4) - match it to available RAM and the languages the user works in
 - workarounds for system-specific problems, as long as the step's verification passes
 
 ## Step 0 — get the repository
 
-If you are not already inside a clone of it:
-
 ```bash
-git clone https://github.com/xtompie/blackbar ~/.local/share/blackbar/src
-cd ~/.local/share/blackbar/src
+git clone https://github.com/xtompie/blackbar ~/.local/share/blackbar/repo
+cd ~/.local/share/blackbar/repo
 ```
 
-That location is only a suggestion - anywhere the user prefers is fine, but the clone has
-to stay: `blackbar update` pulls it and reinstalls from it. Record the exact path in the
-report in step 8, on a line containing the word `repo` - that is where update looks
-for it.
+This path is not negotiable (see **Do not improvise**): `blackbar update` pulls this
+directory and reinstalls from it. If a clone is already there, `git pull` instead.
 
 **Verify:** `INSTALL.md` and `pyproject.toml` are in the current directory.
 
@@ -59,21 +56,19 @@ If a suitable version is missing: `uv python install 3.13` (or `brew install pyt
 
 ## Step 2 — install the package
 
-From the repository directory:
+One environment, one fixed place, installed editable so that `git pull` is enough for
+code changes:
 
 ```bash
-uv tool install --python 3.13 --with 'gliner,huggingface_hub' .
-```
-
-Without `uv`:
-
-```bash
-python3.13 -m venv ~/.local/share/blackbar/venv
-~/.local/share/blackbar/venv/bin/pip install '.[detect]'
+uv venv --python 3.13 ~/.local/share/blackbar/venv     # or: python3.13 -m venv ~/.local/share/blackbar/venv
+~/.local/share/blackbar/venv/bin/pip install -e '.[detect]'
+mkdir -p ~/.local/bin
 ln -sf ~/.local/share/blackbar/venv/bin/blackbar ~/.local/bin/blackbar
 ```
 
-If `torch` refuses to install (old hardware, no wheels), install plain `pip install .`
+Make sure `~/.local/bin` is on the user's `PATH`; add it to their shell profile if not.
+
+If `torch` refuses to install (old hardware, no wheels), install `pip install -e .`
 without the extras - the proxy still works on the `rules` and `regex` layers. Record
 that in the report and tell the user plainly: names and companies will not be detected.
 
@@ -188,7 +183,6 @@ Write `~/.config/blackbar/install-report.md`:
 - date:
 - blackbar version:
 - interpreter: (path and version)
-- environment: (uv tool / venv — exact path)
 - `blackbar` command: (path on PATH, how it was linked)
 - model: (name, size, cache directory) or "none — rules+regex only, reason: ..."
 - active layers:
