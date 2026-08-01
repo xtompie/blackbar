@@ -754,6 +754,13 @@ def doctor() -> None:
     raise typer.Exit(1 if problems else 0)
 
 
+@app.command("help")
+def help_command(ctx: typer.Context) -> None:
+    """Show this help (same as --help)."""
+    parent = ctx.parent
+    print(parent.get_help() if parent is not None else ctx.get_help())
+
+
 @app.command()
 def version() -> None:
     """Version."""
