@@ -4,7 +4,7 @@ A local proxy that strips confidential data out of the traffic Claude Code sends
 puts it back in the reply. The model in the cloud never sees the real values, while on
 your machine everything reads normally.
 
-The finding is done by a model too - a local one, running on your CPU. Names, companies
+The finding is done by an LLM too - a local one, running on your CPU. Names, companies
 and addresses do not follow a pattern, so a regex will not catch them, and shipping the
 text to a cloud classifier would just move the leak to another vendor. Nothing leaves
 the machine, not even the step that decides what is confidential.
@@ -99,7 +99,7 @@ through the proxy.
 |---|---|
 | `rules` | your own patterns from `~/.config/blackbar/rules.yaml` - client names, project codes |
 | `regex` | emails, API keys, tokens, JWTs, IBANs, national IDs, cards, passwords in database URLs |
-| `gliner` | names, companies, addresses - a local NER model, multilingual |
+| `gliner` | names, companies, addresses - a local LLM (NER), multilingual |
 
 Tool results are the main leak source: that is where file contents and command output
 end up. Tool definitions and signed `thinking` blocks are left alone.
@@ -148,6 +148,10 @@ want it anyway, `blackbar attach --force` does it and says what you are taking o
   **orphans** in `blackbar stats`.
 - Only `/v1/messages` and `/v1/messages/count_tokens` are redacted. Any other POST to the
   API is refused with `blackbar_unhandled_endpoint` rather than forwarded unredacted.
+- PDFs and screenshots travel as base64 and are parsed on Anthropic's side, so there is
+  nothing for a local model to read and nothing to put back. Requests carrying them are
+  refused with `blackbar_unredactable_attachment`. Read the file as text instead, or use
+  `blackbar direct claude` when you mean to send it.
 
 ## License
 

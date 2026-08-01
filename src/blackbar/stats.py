@@ -39,6 +39,8 @@ class RequestEvent:
     # [(kind, vault key)] - lets `watch --reveal` ask the vault what was replaced,
     # while the file itself never holds a value
     keys: list[tuple[str, str]] = field(default_factory=list)
+    # set when the request never reached the API, and why
+    refused: str | None = None
     ts: float = field(default_factory=time.time)
     id: int | None = None
 
@@ -59,6 +61,7 @@ class RequestEvent:
             ("kinds", _counts(self.kinds)),
             ("layers", _counts(self.layers)),
             ("keys", ",".join(f"{kind}:{key}" for kind, key in self.keys) or "-"),
+            ("refused", self.refused or "-"),
             ("cache_read", self.usage.get("cache_read_input_tokens") or 0),
             ("input_tokens", self.usage.get("input_tokens") or 0),
         ]
@@ -98,6 +101,7 @@ def parse_line(line: str) -> dict | None:
             for item in (fields.get("keys", "-") or "-").split(",")
             if item and item != "-" and ":" in item
         ],
+        "refused": None if fields.get("refused", "-") == "-" else fields.get("refused"),
         "cache_read": _int(fields.get("cache_read")) or 0,
         "input_tokens": _int(fields.get("input_tokens")) or 0,
     }

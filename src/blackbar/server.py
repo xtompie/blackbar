@@ -20,7 +20,7 @@ from .detect import Redactor
 from .detect.gliner_layer import GlinerDetector
 from .detect.regexes import RegexDetector
 from .detect.rules import RulesDetector
-from .proxy import redact_request, restore_all, restore_response, session_key
+from .proxy import find_opaque_blocks, redact_request, restore_all, restore_response, session_key
 from .sse import SSERewriter
 from .stats import RequestEvent, RequestLog, read_lines, summary
 from .vault import Vault
@@ -94,7 +94,7 @@ def _routes(state: ProxyState) -> list[Route]:
         return await _handle_passthrough(state, request)
 
     async def unhandled(request: Request) -> Response:
-        return _refuse(request)
+        return _refuse(request, state)
 
     return [
         Route("/_admin/health", _admin_health(state), methods=["GET"]),
@@ -114,14 +114,36 @@ def _routes(state: ProxyState) -> list[Route]:
     ]
 
 
-def _refuse(request: Request) -> Response:
+def _refuse(request: Request, state: ProxyState | None = None) -> Response:
     """An endpoint we do not redact must not carry data out behind our back."""
+    if state is not None:
+        state.record(RequestEvent(provider="anthropic", status=501, refused="unhandled_endpoint"))
     return JSONResponse(
         {"error": {
             "type": "blackbar_unhandled_endpoint",
             "message": (
                 f"blackbar does not handle {request.method} {request.url.path}, so it cannot "
                 f"redact it. Run `blackbar direct claude` to bypass the proxy for one session."
+            ),
+        }},
+        status_code=501,
+    )
+
+
+def _refuse_attachment(state: ProxyState, event: RequestEvent, kinds: list[str]) -> Response:
+    """A PDF or an image is base64, parsed on Anthropic's side - we cannot read it, so we
+    cannot redact it, so it does not leave the machine through us."""
+    event.status = 501
+    event.refused = "attachment"
+    state.record(event)
+    listed = ", ".join(sorted(set(kinds)))
+    return JSONResponse(
+        {"error": {
+            "type": "blackbar_unredactable_attachment",
+            "message": (
+                f"blackbar cannot look inside an attachment ({listed}), so it cannot redact it "
+                f"and will not send it. Read the file as text instead, or run "
+                f"`blackbar direct claude` if you mean to send it as-is."
             ),
         }},
         status_code=501,
@@ -151,7 +173,7 @@ async def _handle_messages(state: ProxyState, request: Request) -> Response:
     try:
         body: dict[str, Any] = json.loads(raw)
     except json.JSONDecodeError:
-        return _refuse(request)
+        return _refuse(request, state)
 
     started = time.perf_counter()
     event = RequestEvent(
@@ -160,6 +182,11 @@ async def _handle_messages(state: ProxyState, request: Request) -> Response:
         streaming=bool(body.get("stream")),
         session=session_key(body, request.headers.get("user-agent", "")),
     )
+
+    opaque = find_opaque_blocks(body)
+    if opaque:
+        event.total_ms = (time.perf_counter() - started) * 1000
+        return _refuse_attachment(state, event, opaque)
 
     detect_started = time.perf_counter()
     kinds, layers, masked, keys = await redact_request(body, state.redactor)

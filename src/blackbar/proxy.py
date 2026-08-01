@@ -98,6 +98,35 @@ async def _scan_json(value, scan):
     return value
 
 
+# Blocks whose payload is base64, not text: a PDF or a screenshot. Claude Code puts them
+# inside tool_result and the API parses them on its side, so whatever is in them would
+# leave the machine untouched - we cannot read them, so we do not let them through.
+OPAQUE_BLOCKS = {"image", "document"}
+
+
+def find_opaque_blocks(body: dict) -> list[str]:
+    """Returns a description of every attachment we would not be able to redact."""
+    found: list[str] = []
+
+    def walk(content) -> None:
+        if not isinstance(content, list):
+            return
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            kind = block.get("type")
+            if kind in OPAQUE_BLOCKS:
+                media = (block.get("source") or {}).get("media_type") or kind
+                found.append(str(media))
+            elif kind == "tool_result":
+                walk(block.get("content"))
+
+    for message in body.get("messages") or []:
+        if isinstance(message, dict):
+            walk(message.get("content"))
+    return found
+
+
 def restore_response(body: dict, vault: Vault) -> tuple[int, int]:
     """Restores originals in a non-streaming response. Returns (restored, orphans)."""
     restored = 0

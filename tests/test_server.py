@@ -177,3 +177,46 @@ async def test_request_lands_in_the_log_file(proxy):
     assert latest["cache_read"] == 500
     assert latest["kinds"] == {"email": 1}
     assert latest["keys"][0][0] == "email"
+
+
+async def test_pdf_attachment_is_refused(proxy):
+    """Claude Code sends PDFs as base64 inside tool_result; we cannot read them."""
+    SEEN.clear()
+    response = await _call(proxy, "/v1/messages", json={
+        "model": "claude-opus-5",
+        "messages": [{"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": [
+                {"type": "text", "text": "here it is"},
+                {"type": "document", "source": {
+                    "type": "base64", "media_type": "application/pdf", "data": "JVBERi0xLjQK"}},
+            ]},
+        ]}],
+    })
+    assert response.status_code == 501
+    assert response.json()["error"]["type"] == "blackbar_unredactable_attachment"
+    assert "application/pdf" in response.json()["error"]["message"]
+    assert "body" not in SEEN  # nothing reached the API
+
+
+async def test_screenshot_is_refused(proxy):
+    SEEN.clear()
+    response = await _call(proxy, "/v1/messages", json={
+        "model": "claude-opus-5",
+        "messages": [{"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBOR"}},
+        ]}],
+    })
+    assert response.status_code == 501
+    assert "body" not in SEEN
+
+
+async def test_refusal_is_written_to_the_log(proxy):
+    await _call(proxy, "/v1/messages", json={
+        "model": "claude-opus-5",
+        "messages": [{"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBOR"}},
+        ]}],
+    })
+    latest = read_lines(proxy.state.proxy.config.requests_path, limit=1)[0]
+    assert latest["refused"] == "attachment"
+    assert latest["status"] == 501
